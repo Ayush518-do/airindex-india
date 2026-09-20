@@ -1,8 +1,20 @@
-from fastapi import FastAPI
+from datetime import datetime, timedelta
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, get_db
 from app.synthetic_data import seed_reference_data, generate_synthetic_observations
+from app.models import (
+    Airport, Airline, Route, FareObservation, IndexValue, RouteIndexValue,
+    AirlineIndexValue, Anomaly, SourceHealth, Event,
+)
+from app.index_engine.index import calculate_index, INDEX_NAME
+from app.index_engine.anomaly import detect_anomalies_all_routes
+from app.index_engine.data_quality import compute_data_quality
+from app.index_engine.basket import select_basket
 
 app = FastAPI(
     title=settings.api_title,
@@ -19,88 +31,374 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+DATA_MODE = "DEMONSTRATION DATA"
+
+
+def _available_periods(db: Session) -> list[str]:
+    """All calendar months (YYYY-MM) that have fare observations, sorted."""
+    timestamps = db.query(FareObservation.observation_timestamp).distinct().all()
+    periods = sorted({f"{ts.year:04d}-{ts.month:02d}" for (ts,) in timestamps if ts is not None})
+    return periods
+
+
+def _ensure_index_calculated(db: Session) -> IndexValue | None:
+    """
+    Returns the most recent IndexValue, calculating it first if one doesn't
+    exist yet for the latest available period.
+    """
+    periods = _available_periods(db)
+    if not periods:
+        return None
+    base_period, current_period = periods[0], periods[-1]
+
+    latest = (
+        db.query(IndexValue)
+        .filter(IndexValue.calculation_period == current_period, IndexValue.base_period == base_period)
+        .order_by(IndexValue.created_at.desc())
+        .first()
+    )
+    if latest:
+        return latest
+
+    result = calculate_index(db, base_period=base_period, calculation_period=current_period)
+    if result.get("index_value") is None:
+        return None
+    return (
+        db.query(IndexValue)
+        .filter(IndexValue.calculation_period == current_period, IndexValue.base_period == base_period)
+        .order_by(IndexValue.created_at.desc())
+        .first()
+    )
+
+
 @app.on_event("startup")
 async def startup_event():
     try:
         init_db()
         seed_reference_data()
         generate_synthetic_observations()
-        print("Database initialized successfully")
+
+        db = next(get_db())
+        try:
+            detect_anomalies_all_routes(db)
+            _ensure_index_calculated(db)
+            for source_name in ("SYNTHETIC", "DEMO"):
+                existing = db.query(SourceHealth).filter(SourceHealth.source == source_name).first()
+                if not existing:
+                    db.add(SourceHealth(
+                        source=source_name,
+                        last_successful_run=datetime.utcnow(),
+                        success_rate=1.0,
+                        records_last_run=db.query(func.count(FareObservation.id)).scalar() or 0,
+                        status="ACTIVE",
+                    ))
+            db.commit()
+        finally:
+            db.close()
+
+        print("Startup complete: database initialized, data seeded, index calculated")
     except Exception as e:
         print(f"Startup error: {e}")
+
 
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "AIRINDEX INDIA"}
 
+
 @app.get("/api/dashboard/summary")
-async def dashboard_summary():
+async def dashboard_summary(db: Session = Depends(get_db)):
+    latest = _ensure_index_calculated(db)
+    if latest is None:
+        raise HTTPException(status_code=503, detail="Index not yet available. No fare observations found.")
+
+    periods = _available_periods(db)
+    prior_value = None
+    if len(periods) >= 2:
+        base_period, prior_period = periods[0], periods[-2]
+        prior = (
+            db.query(IndexValue)
+            .filter(IndexValue.calculation_period == prior_period, IndexValue.base_period == base_period)
+            .order_by(IndexValue.created_at.desc())
+            .first()
+        )
+        if prior is None:
+            # Not calculated yet (e.g. dashboard opened before any other
+            # endpoint touched this period) - calculate it now rather than
+            # silently reporting no change.
+            result = calculate_index(db, base_period=base_period, calculation_period=prior_period)
+            prior_value = result.get("index_value")
+        else:
+            prior_value = prior.index_value
+
+    index_change = None
+    if prior_value:
+        index_change = round((latest.index_value - prior_value) / prior_value * 100, 2)
+
+    quality = compute_data_quality(db)
+
     return {
-        "current_index": 115.4,
-        "index_change": 2.1,
-        "routes_covered": 18,
-        "airlines_covered": 6,
-        "observations_count": 1250,
-        "data_quality_score": 0.93,
-        "last_updated": "2024-01-20T15:30:00Z",
-        "data_mode": "DEMONSTRATION DATA"
+        "current_index": latest.index_value,
+        "index_change": index_change,
+        "routes_covered": latest.route_count,
+        "airlines_covered": quality["total_airlines"],
+        "observations_count": latest.observation_count,
+        "data_quality_score": latest.data_quality_score,
+        "last_updated": latest.created_at.isoformat(),
+        "base_period": latest.base_period,
+        "calculation_period": latest.calculation_period,
+        "data_mode": DATA_MODE,
     }
+
 
 @app.get("/api/index/current")
-async def get_current_index():
+async def get_current_index(db: Session = Depends(get_db)):
+    latest = _ensure_index_calculated(db)
+    if latest is None:
+        raise HTTPException(status_code=503, detail="Index not yet available.")
     return {
-        "index_value": 115.4,
-        "index_change": 2.1,
-        "calculation_period": "2024-01",
-        "route_count": 18,
-        "observation_count": 1250,
-        "data_quality_score": 0.93,
-        "last_updated": "2024-01-20T15:30:00Z"
+        "index_value": latest.index_value,
+        "base_period": latest.base_period,
+        "calculation_period": latest.calculation_period,
+        "route_count": latest.route_count,
+        "observation_count": latest.observation_count,
+        "data_quality_score": latest.data_quality_score,
+        "last_updated": latest.created_at.isoformat(),
+        "methodology_note": "PROTOTYPE index for demonstration only - not the official MoSPI CPI methodology.",
     }
+
 
 @app.get("/api/index/history")
-async def get_index_history():
+async def get_index_history(db: Session = Depends(get_db)):
+    _ensure_index_calculated(db)
+    periods = _available_periods(db)
+    if not periods:
+        return {"periods": [], "values": []}
+    base_period = periods[0]
+
+    values = []
+    for period in periods:
+        row = (
+            db.query(IndexValue)
+            .filter(IndexValue.calculation_period == period, IndexValue.base_period == base_period)
+            .order_by(IndexValue.created_at.desc())
+            .first()
+        )
+        if not row:
+            result = calculate_index(db, base_period=base_period, calculation_period=period)
+            if result.get("index_value") is None:
+                continue
+            row = (
+                db.query(IndexValue)
+                .filter(IndexValue.calculation_period == period, IndexValue.base_period == base_period)
+                .order_by(IndexValue.created_at.desc())
+                .first()
+            )
+        if row:
+            values.append((period, row.index_value))
+
     return {
-        "periods": ["2023-07", "2023-08", "2023-09", "2023-10", "2023-11", "2023-12", "2024-01"],
-        "values": [100.0, 101.5, 103.2, 105.8, 109.3, 112.7, 115.4]
+        "periods": [p for p, _ in values],
+        "values": [v for _, v in values],
+        "base_period": base_period,
     }
+
+
+@app.post("/api/index/simulate")
+async def simulate_index(
+    base_period: str,
+    calculation_period: str,
+    max_routes: int = 12,
+    db: Session = Depends(get_db),
+):
+    """Index Methodology Simulator (spec section 31) - recalculates without persisting as the canonical value."""
+    result = calculate_index(db, base_period=base_period, calculation_period=calculation_period, max_routes=max_routes)
+    if result.get("index_value") is None:
+        raise HTTPException(status_code=400, detail=result.get("error", "Unable to calculate index for given periods."))
+    return result
+
 
 @app.get("/api/routes")
-async def get_routes():
+async def get_routes(db: Session = Depends(get_db)):
+    latest = _ensure_index_calculated(db)
+    routes = db.query(Route).filter(Route.is_active == True).all()  # noqa: E712
+
+    route_index_rows = {}
+    if latest:
+        rows = db.query(RouteIndexValue).filter(RouteIndexValue.period == latest.calculation_period).all()
+        route_index_rows = {r.route_id: r for r in rows}
+
+    result = []
+    for route in routes:
+        riv = route_index_rows.get(route.id)
+        result.append({
+            "id": route.id,
+            "origin": route.origin_airport.iata_code if route.origin_airport else None,
+            "destination": route.destination_airport.iata_code if route.destination_airport else None,
+            "region": route.region,
+            "distance_km": round(route.distance_km, 1) if route.distance_km else None,
+            "index": riv.index_value if riv else None,
+            "weight": riv.weight if riv else None,
+            "contribution": riv.contribution if riv else None,
+        })
+    return {"total": len(result), "routes": result}
+
+
+@app.get("/api/routes/{route_id}/history")
+async def get_route_history(route_id: int, db: Session = Depends(get_db)):
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    riv_rows = (
+        db.query(RouteIndexValue)
+        .filter(RouteIndexValue.route_id == route_id)
+        .order_by(RouteIndexValue.period.asc())
+        .all()
+    )
     return {
-        "total": 18,
-        "routes": [
-            {"id": 1, "origin": "DEL", "destination": "BOM", "index": 118.4, "change": 2.1},
-            {"id": 2, "origin": "DEL", "destination": "BLR", "index": 112.3, "change": 1.8},
-            {"id": 3, "origin": "BOM", "destination": "GOI", "index": 108.9, "change": 1.2},
-        ]
+        "route_id": route_id,
+        "origin": route.origin_airport.iata_code if route.origin_airport else None,
+        "destination": route.destination_airport.iata_code if route.destination_airport else None,
+        "periods": [r.period for r in riv_rows],
+        "index_values": [r.index_value for r in riv_rows],
+        "price_relatives": [r.price_relative for r in riv_rows],
     }
+
+
+@app.get("/api/routes/basket")
+async def get_route_basket(db: Session = Depends(get_db)):
+    """Shows why each route was selected (spec section 16)."""
+    periods = _available_periods(db)
+    if not periods:
+        return {"basket": []}
+    basket = select_basket(db, periods[-1])
+    return {"period": periods[-1], "basket": basket}
+
+
+@app.get("/api/airlines")
+async def get_airlines(db: Session = Depends(get_db)):
+    airlines = db.query(Airline).filter(Airline.is_active == True).all()  # noqa: E712
+    periods = _available_periods(db)
+    latest_period = periods[-1] if periods else None
+
+    contrib_by_airline = {}
+    if latest_period:
+        rows = db.query(AirlineIndexValue).filter(AirlineIndexValue.period == latest_period).all()
+        contrib_by_airline = {r.airline_id: r.contribution for r in rows}
+
+    return {
+        "total": len(airlines),
+        "airlines": [
+            {
+                "id": a.id,
+                "iata_code": a.iata_code,
+                "name": a.name,
+                "contribution": contrib_by_airline.get(a.id),
+            }
+            for a in airlines
+        ],
+    }
+
 
 @app.get("/api/anomalies")
-async def get_anomalies():
-    return {
-        "total": 2,
-        "anomalies": [
-            {"route": "DEL-BOM", "fare": 8900, "expected": 4200, "deviation": 112.0, "severity": "HIGH"},
-            {"route": "BOM-GOI", "fare": 7500, "expected": 3100, "deviation": 142.0, "severity": "CRITICAL"},
-        ]
-    }
+async def get_anomalies(severity: str | None = None, db: Session = Depends(get_db)):
+    detect_anomalies_all_routes(db)
+
+    query = db.query(Anomaly)
+    if severity:
+        query = query.filter(Anomaly.severity == severity.upper())
+    # Surface the most extreme deviations across the whole network first,
+    # rather than whichever route happened to be processed last.
+    anomalies = query.order_by(func.abs(Anomaly.deviation).desc()).limit(50).all()
+
+    result = []
+    for a in anomalies:
+        obs = db.get(FareObservation, a.fare_observation_id)
+        route = db.get(Route, a.route_id) if a.route_id else None
+        result.append({
+            "id": a.id,
+            "route": f"{route.origin_airport.iata_code}-{route.destination_airport.iata_code}" if route else None,
+            "fare": a.actual_value,
+            "expected": a.expected_value,
+            "deviation": a.deviation,
+            "severity": a.severity,
+            "status": a.status,
+            "algorithm": a.algorithm,
+            "detected_at": a.detected_at.isoformat() if a.detected_at else None,
+        })
+    return {"total": len(result), "anomalies": result}
+
+
+@app.post("/api/anomalies/{anomaly_id}/review")
+async def review_anomaly(anomaly_id: int, status: str, db: Session = Depends(get_db)):
+    anomaly = db.get(Anomaly, anomaly_id)
+    if not anomaly:
+        raise HTTPException(status_code=404, detail="Anomaly not found")
+    valid_statuses = {"REVIEWED", "VALID_ANOMALY", "INVALID_OBSERVATION"}
+    if status.upper() not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"status must be one of {valid_statuses}")
+    anomaly.status = status.upper()
+    db.commit()
+    return {"id": anomaly.id, "status": anomaly.status}
+
 
 @app.get("/api/data-quality")
-async def get_data_quality():
-    return {
-        "observation_coverage": 0.96,
-        "route_coverage": 0.92,
-        "airline_coverage": 0.88,
-        "source_availability": 0.94,
-        "overall_score": 0.93
-    }
+async def get_data_quality(db: Session = Depends(get_db)):
+    return compute_data_quality(db)
+
 
 @app.get("/api/source-health")
-async def get_source_health():
+async def get_source_health(db: Session = Depends(get_db)):
+    sources = db.query(SourceHealth).all()
     return {
         "sources": [
-            {"name": "SYNTHETIC", "status": "ACTIVE", "last_run": "2024-01-20T15:30:00Z", "success_rate": 1.0},
-            {"name": "DEMO", "status": "ACTIVE", "last_run": "2024-01-20T15:30:00Z", "success_rate": 0.95},
+            {
+                "name": s.source,
+                "status": s.status,
+                "last_successful_run": s.last_successful_run.isoformat() if s.last_successful_run else None,
+                "last_failed_run": s.last_failed_run.isoformat() if s.last_failed_run else None,
+                "success_rate": s.success_rate,
+                "records_last_run": s.records_last_run,
+            }
+            for s in sources
         ]
     }
+
+
+@app.get("/api/events")
+async def get_events(db: Session = Depends(get_db)):
+    events = db.query(Event).all()
+    return {
+        "total": len(events),
+        "events": [
+            {
+                "id": e.id,
+                "name": e.name,
+                "event_type": e.event_type,
+                "start_date": e.start_date,
+                "end_date": e.end_date,
+                "region": e.region,
+            }
+            for e in events
+        ],
+    }
+
+
+@app.post("/api/admin/recalculate-index")
+async def admin_recalculate_index(db: Session = Depends(get_db)):
+    """Admin: force recalculation of the current index (spec section 41)."""
+    periods = _available_periods(db)
+    if not periods:
+        raise HTTPException(status_code=503, detail="No fare data available.")
+    base_period, current_period = periods[0], periods[-1]
+    result = calculate_index(db, base_period=base_period, calculation_period=current_period)
+    if result.get("index_value") is None:
+        raise HTTPException(status_code=400, detail=result.get("error"))
+    return result
+
+
+@app.post("/api/admin/detect-anomalies")
+async def admin_detect_anomalies(db: Session = Depends(get_db)):
+    count = detect_anomalies_all_routes(db)
+    return {"newly_flagged": count}
