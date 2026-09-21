@@ -12,7 +12,7 @@ from app.models import (
     AirlineIndexValue, Anomaly, SourceHealth, Event,
 )
 from app.index_engine.index import calculate_index, INDEX_NAME
-from app.index_engine.anomaly import detect_anomalies_all_routes
+from app.index_engine.anomaly import detect_anomalies_all_routes, booking_window_bucket
 from app.index_engine.data_quality import compute_data_quality
 from app.index_engine.basket import select_basket
 
@@ -402,3 +402,196 @@ async def admin_recalculate_index(db: Session = Depends(get_db)):
 async def admin_detect_anomalies(db: Session = Depends(get_db)):
     count = detect_anomalies_all_routes(db)
     return {"newly_flagged": count}
+
+
+@app.get("/api/booking-window")
+async def get_booking_window(route_id: int | None = None, db: Session = Depends(get_db)):
+    """
+    Average fare by booking-window bucket (spec section 15/24). Shows the
+    classic curve: fares rise as departure approaches.
+    """
+    query = db.query(FareObservation).filter(FareObservation.is_valid == True)  # noqa: E712
+    if route_id:
+        query = query.filter(FareObservation.route_id == route_id)
+    observations = query.all()
+
+    buckets: dict[str, list[float]] = {}
+    for obs in observations:
+        if obs.days_to_departure is None or obs.total_fare is None:
+            continue
+        label = booking_window_bucket(obs.days_to_departure)
+        buckets.setdefault(label, []).append(obs.total_fare)
+
+    order = ["90+", "60-89", "30-59", "15-29", "8-14", "1-7"]
+    return {
+        "route_id": route_id,
+        "buckets": [
+            {
+                "bucket": label,
+                "average_fare": round(sum(buckets[label]) / len(buckets[label]), 2),
+                "observation_count": len(buckets[label]),
+            }
+            for label in order
+            if label in buckets
+        ],
+    }
+
+
+@app.get("/api/booking-window/heatmap")
+async def get_booking_window_heatmap(db: Session = Depends(get_db)):
+    """Per-route average fare across booking-window buckets (spec section 24)."""
+    latest = _ensure_index_calculated(db)
+    if latest is None:
+        return {"routes": [], "buckets": []}
+
+    basket_route_ids = [
+        r.route_id for r in
+        db.query(RouteIndexValue).filter(RouteIndexValue.period == latest.calculation_period).all()
+    ]
+    if not basket_route_ids:
+        return {"routes": [], "buckets": []}
+
+    observations = (
+        db.query(FareObservation)
+        .filter(FareObservation.route_id.in_(basket_route_ids), FareObservation.is_valid == True)  # noqa: E712
+        .all()
+    )
+
+    grid: dict[int, dict[str, list[float]]] = {}
+    for obs in observations:
+        if obs.days_to_departure is None or obs.total_fare is None:
+            continue
+        label = booking_window_bucket(obs.days_to_departure)
+        grid.setdefault(obs.route_id, {}).setdefault(label, []).append(obs.total_fare)
+
+    order = ["90+", "60-89", "30-59", "15-29", "8-14", "1-7"]
+    rows = []
+    for route_id, buckets in grid.items():
+        route = db.get(Route, route_id)
+        if not route:
+            continue
+        rows.append({
+            "route_id": route_id,
+            "route": f"{route.origin_airport.iata_code}-{route.destination_airport.iata_code}",
+            "values": {
+                label: round(sum(v) / len(v)) for label, v in buckets.items()
+            },
+        })
+    rows.sort(key=lambda r: r["route"])
+    return {"buckets": order, "routes": rows}
+
+
+@app.get("/api/regions")
+async def get_regions(db: Session = Depends(get_db)):
+    """Regional airfare index (spec section 21), by route origin region."""
+    latest = _ensure_index_calculated(db)
+    if latest is None:
+        return {"regions": []}
+
+    riv_rows = (
+        db.query(RouteIndexValue)
+        .filter(RouteIndexValue.period == latest.calculation_period)
+        .all()
+    )
+
+    by_region: dict[str, list[tuple[float, float]]] = {}
+    for riv in riv_rows:
+        route = db.get(Route, riv.route_id)
+        if not route or not route.region:
+            continue
+        by_region.setdefault(route.region, []).append((riv.price_relative, riv.weight))
+
+    regions = []
+    for region, entries in by_region.items():
+        weight_total = sum(w for _, w in entries) or 1.0
+        weighted = sum(pr * w for pr, w in entries) / weight_total
+        regions.append({
+            "region": region,
+            "index_value": round(weighted, 2),
+            "route_count": len(entries),
+        })
+    regions.sort(key=lambda r: -r["index_value"])
+    return {"period": latest.calculation_period, "regions": regions}
+
+
+@app.get("/api/routes/{route_id}")
+async def get_route_detail(route_id: int, db: Session = Depends(get_db)):
+    """Route drill-down (spec section 37)."""
+    route = db.get(Route, route_id)
+    if not route:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    periods = _available_periods(db)
+    latest_period = periods[-1] if periods else None
+
+    observations = (
+        db.query(FareObservation)
+        .filter(FareObservation.route_id == route_id, FareObservation.is_valid == True)  # noqa: E712
+        .all()
+    )
+    current = [
+        o.total_fare for o in observations
+        if o.observation_timestamp and f"{o.observation_timestamp.year:04d}-{o.observation_timestamp.month:02d}" == latest_period
+    ]
+
+    by_airline: dict[int, list[float]] = {}
+    for o in observations:
+        if o.total_fare is not None:
+            by_airline.setdefault(o.airline_id, []).append(o.total_fare)
+
+    airline_rows = []
+    for airline_id, fares in by_airline.items():
+        airline = db.get(Airline, airline_id)
+        airline_rows.append({
+            "airline": airline.name if airline else "Unknown",
+            "average_fare": round(sum(fares) / len(fares), 2),
+            "observation_count": len(fares),
+        })
+    airline_rows.sort(key=lambda a: a["average_fare"])
+
+    riv = (
+        db.query(RouteIndexValue)
+        .filter(RouteIndexValue.route_id == route_id, RouteIndexValue.period == latest_period)
+        .first()
+    )
+
+    anomaly_count = db.query(func.count(Anomaly.id)).filter(Anomaly.route_id == route_id).scalar() or 0
+
+    fares_all = [o.total_fare for o in observations if o.total_fare is not None]
+    mean_fare = sum(fares_all) / len(fares_all) if fares_all else 0
+    variance = sum((f - mean_fare) ** 2 for f in fares_all) / len(fares_all) if fares_all else 0
+    volatility = (variance ** 0.5 / mean_fare) if mean_fare else 0
+
+    return {
+        "route_id": route_id,
+        "origin": route.origin_airport.iata_code if route.origin_airport else None,
+        "destination": route.destination_airport.iata_code if route.destination_airport else None,
+        "origin_city": route.origin_airport.city if route.origin_airport else None,
+        "destination_city": route.destination_airport.city if route.destination_airport else None,
+        "region": route.region,
+        "distance_km": round(route.distance_km, 1) if route.distance_km else None,
+        "current_average_fare": round(sum(current) / len(current), 2) if current else None,
+        "index_value": riv.index_value if riv else None,
+        "price_relative": riv.price_relative if riv else None,
+        "weight": riv.weight if riv else None,
+        "in_basket": riv is not None,
+        "observation_count": len(observations),
+        "anomaly_count": anomaly_count,
+        "volatility": round(volatility, 4),
+        "airline_breakdown": airline_rows,
+    }
+
+
+@app.get("/api/airports")
+async def get_airports(db: Session = Depends(get_db)):
+    """Airport reference with coordinates, for the network map."""
+    airports = db.query(Airport).filter(Airport.is_active == True).all()  # noqa: E712
+    return {
+        "airports": [
+            {
+                "id": a.id, "iata_code": a.iata_code, "city": a.city,
+                "region": a.region, "latitude": a.latitude, "longitude": a.longitude,
+            }
+            for a in airports
+        ]
+    }
