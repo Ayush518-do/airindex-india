@@ -1,16 +1,29 @@
+# secrets
+.env
+
+# python
 __pycache__/
 *.pyc
-.env
 .venv/
 venv/
-node_modules/
-.DS_Store
-.vscode/
-.idea/
-*.log
 .pytest_cache/
-ml_models/*.pkl
-data/processed/
+
+# node
+node_modules/
 dist/
 build/
-.next/
+
+# data — raw JSON snapshots ARE committed (demo fallback); processed DB is rebuilt
+data/processed/*.db
+data/processed/*.db-journal
+data/models/*.pkl
+
+# playwright
+playwright-report/
+test-results/
+
+# editors / os
+.vscode/
+.idea/
+.DS_Store
+*.log

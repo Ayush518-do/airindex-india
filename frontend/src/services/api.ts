@@ -2,125 +2,199 @@ import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 
-export const api = axios.create({ baseURL: API_BASE_URL });
+export const api = axios.create({ baseURL: API_BASE_URL, timeout: 15000 });
+export const API_DOCS_URL = `${API_BASE_URL}/docs`;
 
-export interface DashboardSummary {
-  current_index: number;
-  index_change: number | null;
-  routes_covered: number;
-  airlines_covered: number;
-  observations_count: number;
-  data_quality_score: number;
-  last_updated: string;
-  base_period: string;
-  calculation_period: string;
-  data_mode: string;
+// ---------------------------------------------------------------- types ---
+
+export interface Meta {
+  data_mode: 'fake' | 'snapshot';
+  snapshot_at: string | null;
+  routes: string[];
+  weights: Record<string, number>;
+  windows: string[];
+  carriers: string[];
+  n_real_days: number;
+  n_synthetic_days: number;
+  sources: { source: string; last_scraped_at: string; snapshots: number; records: number; synthetic: boolean }[];
+  db_path: string | null;
 }
 
-export interface IndexHistory {
-  periods: string[];
-  values: number[];
-  base_period: string;
+export interface IndexPoint {
+  date: string;
+  value: number;
+  change_pct: number | null;
+  n_records: number;
+  coverage?: number;
+  is_synthetic?: boolean;
 }
 
-export interface RouteRow {
-  id: number;
-  origin: string | null;
-  destination: string | null;
-  region: string | null;
-  distance_km: number | null;
-  index: number | null;
-  weight: number | null;
-  contribution: number | null;
+export interface IndexDaily {
+  index_name: string;
+  base_date: string;
+  base_value: number;
+  weights: Record<string, number>;
+  points: IndexPoint[];
+  latest: { date: string; value: number; change_pct: number | null; change_abs: number };
+  n_real_days?: number;
+  n_synthetic_days?: number;
 }
 
-export interface RouteDetail {
-  route_id: number;
-  origin: string | null;
-  destination: string | null;
-  origin_city: string | null;
-  destination_city: string | null;
-  region: string | null;
-  distance_km: number | null;
-  current_average_fare: number | null;
-  index_value: number | null;
-  price_relative: number | null;
-  weight: number | null;
-  in_basket: boolean;
-  observation_count: number;
-  anomaly_count: number;
-  volatility: number;
-  airline_breakdown: { airline: string; average_fare: number; observation_count: number }[];
+export interface ForecastPoint {
+  date: string;
+  value: number;
+  lower: number;
+  upper: number;
 }
 
-export interface AnomalyRow {
-  id: number;
-  route: string | null;
-  fare: number;
-  expected: number;
-  deviation: number;
-  severity: string;
-  status: string;
-  algorithm: string;
-  detected_at: string | null;
+export interface IndexForecast {
+  method: string;
+  history_days: number;
+  horizon_days: number;
+  slope_per_day: number;
+  r2?: number | null;
+  residual_se?: number | null;
+  anchor: { date: string; value: number };
+  points: ForecastPoint[];
 }
 
-export interface AirlineRow {
-  id: number;
-  iata_code: string;
-  name: string;
-  contribution: number | null;
+export interface HeatmapCell {
+  route: string;
+  window: string;
+  avg_fare: number;
+  n: number;
 }
 
-export interface DataQuality {
-  observation_coverage: number;
-  route_coverage: number;
-  airline_coverage: number;
-  source_availability: number;
-  missing_data_rate: number;
-  validation_rate: number;
-  overall_score: number;
-  total_observations: number;
-  total_routes: number;
-  total_airlines: number;
+export interface Heatmap {
+  routes: string[];
+  windows: string[];
+  cells: HeatmapCell[];
 }
 
-export interface Airport {
-  id: number;
-  iata_code: string;
-  city: string;
-  region: string;
-  latitude: number;
-  longitude: number;
+export interface RouteWindow {
+  window: string;
+  actual_avg: number | null;
+  median?: number | null;
+  predicted_avg: number | null;
+  min_fare: number | null;
+  max_fare: number | null;
+  n: number;
 }
 
-export const getDashboardSummary = () =>
-  api.get<DashboardSummary>('/api/dashboard/summary').then(r => r.data);
-export const getIndexHistory = () =>
-  api.get<IndexHistory>('/api/index/history').then(r => r.data);
-export const getRoutes = () =>
-  api.get<{ total: number; routes: RouteRow[] }>('/api/routes').then(r => r.data);
-export const getRouteDetail = (id: number) =>
-  api.get<RouteDetail>(`/api/routes/${id}`).then(r => r.data);
-export const getAnomalies = () =>
-  api.get<{ total: number; anomalies: AnomalyRow[] }>('/api/anomalies').then(r => r.data);
-export const getAirlines = () =>
-  api.get<{ total: number; airlines: AirlineRow[] }>('/api/airlines').then(r => r.data);
-export const getDataQuality = () =>
-  api.get<DataQuality>('/api/data-quality').then(r => r.data);
-export const getSourceHealth = () =>
-  api.get<{ sources: any[] }>('/api/source-health').then(r => r.data);
-export const getBookingWindow = (routeId?: number) =>
-  api.get<{ buckets: { bucket: string; average_fare: number; observation_count: number }[] }>(
-    '/api/booking-window', { params: routeId ? { route_id: routeId } : {} },
-  ).then(r => r.data);
-export const getBookingHeatmap = () =>
-  api.get<{ buckets: string[]; routes: { route_id: number; route: string; values: Record<string, number> }[] }>(
-    '/api/booking-window/heatmap',
-  ).then(r => r.data);
-export const getRegions = () =>
-  api.get<{ period: string; regions: { region: string; index_value: number; route_count: number }[] }>(
-    '/api/regions',
-  ).then(r => r.data);
-export const getAirports = () =>
-  api.get<{ airports: Airport[] }>('/api/airports').then(r => r.data);
+export interface RouteTrend {
+  route: string;
+  date?: string;
+  windows: RouteWindow[];
+  carriers: { carrier: string; carrier_name?: string | null; avg_fare: number; n: number }[];
+}
+
+export interface FareRecord {
+  origin: string;
+  destination: string;
+  route: string;
+  carrier: string;
+  travel_date: string;
+  advance_purchase_days: number;
+  advance_purchase_window: string;
+  fare_class: string;
+  base_fare: number | null;
+  taxes: number | null;
+  total_fare: number;
+  scraped_at: string;
+  scrape_date?: string;
+  source: string;
+  stops?: number | null;
+  duration_min?: number | null;
+  departure_time?: string | null;
+  flight_number?: string | null;
+  carrier_name?: string | null;
+  is_outlier?: boolean;
+  is_synthetic?: boolean;
+}
+
+export interface Festival { name: string; start: string; end: string; observed?: string }
+
+export interface SurgeRow {
+  festival: string;
+  route: string;
+  normal_avg: number;
+  festival_avg: number;
+  surge_pct: number;
+  n_festival: number;
+  n_normal: number;
+  windows?: string[];
+  basis?: 'same window' | 'route overall';
+}
+
+export interface FestivalSurge {
+  festivals: Festival[];
+  surge: SurgeRow[];
+  n_records?: number;
+}
+
+export interface SavedRoute {
+  id: number | string;
+  browser_id: string;
+  origin: string;
+  destination: string;
+  preferred_days: string[];
+  email: string;
+  created_at: string;
+  last_notified_at: string | null;
+}
+
+export interface RouteAlerts {
+  browser_id: string;
+  checked_at: string;
+  any_cheap: boolean;
+  alerts: {
+    route: string;
+    today_fare: number | null;
+    baseline_fare: number | null;
+    pct_below_baseline: number | null;
+    is_cheap: boolean;
+    last_notified_at?: string | null;
+  }[];
+}
+
+export interface Prediction {
+  route: string; carrier: string; travel_date: string; as_of: string; predicted_fare: number;
+  features: Record<string, string | number>;
+  model: { holdout_mae_inr: number; holdout_mape_pct: number; holdout_r2: number; n_real: number; n_synthetic: number };
+}
+
+export interface Backtest {
+  reference: { name: string; intended_source: string; status: 'ILLUSTRATIVE' | 'OFFICIAL'; note: string; lead_times_days: number[]; unit: string };
+  latest_month: string | null;
+  comparison: { route: string; month: string | null; ours: number | null; n: number; reference: number | null; deviation_pct: number | null }[];
+  mean_abs_deviation_pct: number | null;
+  series: { month: string; ours_index: number | null; reference_index: number | null; ours_fare: number | null; reference_fare: number | null }[];
+  include_synthetic: boolean;
+}
+
+// ---------------------------------------------------------------- calls ---
+
+export const getMeta = () => api.get<Meta>('/meta').then(r => r.data);
+export const getIndexDaily = () => api.get<IndexDaily>('/index/daily').then(r => r.data);
+export const getIndexForecast = (days = 5) =>
+  api.get<IndexForecast>('/index/forecast', { params: { days } }).then(r => r.data);
+export const getHeatmap = () => api.get<Heatmap>('/index/heatmap').then(r => r.data);
+export const getRouteTrend = (route: string) =>
+  api.get<RouteTrend>(`/routes/${route}/trend`).then(r => r.data);
+export const getFaresRaw = (params: {
+  route?: string; date_from?: string; date_to?: string; limit?: number; offset?: number; nonstop_only?: boolean;
+}) =>
+  api.get<{ count: number; total: number; records: FareRecord[] }>('/fares/raw', { params }).then(r => r.data);
+export const getFestivalSurge = () => api.get<FestivalSurge>('/festivals/surge').then(r => r.data);
+export const saveRoute = (body: {
+  browser_id: string; origin: string; destination: string; preferred_days: string[]; email: string;
+}) => api.post<SavedRoute>('/routes/save', body).then(r => r.data);
+export const getSavedRoutes = (browserId: string) =>
+  api.get<{ browser_id: string; routes: SavedRoute[] }>(`/routes/saved/${browserId}`).then(r => r.data);
+export const deleteSavedRoute = (browserId: string, id: number | string) =>
+  api.delete(`/routes/saved/${browserId}/${id}`).then(() => undefined);
+export const getRouteAlerts = (browserId: string) =>
+  api.get<RouteAlerts>(`/routes/${browserId}/alerts`).then(r => r.data);
+export const getBacktest = () => api.get<Backtest>('/backtest/dgca').then(r => r.data);
+export const getPrediction = (params: { route: string; travel_date: string; carrier?: string }) =>
+  api.get<Prediction>('/predict', { params }).then(r => r.data);

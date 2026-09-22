@@ -1,171 +1,175 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import Aurora from '../components/reactbits/Aurora';
+import FadeContent from '../components/reactbits/FadeContent';
+import TopBar, { type Tab } from '../components/TopBar';
+import HeroStat from '../components/HeroStat';
+import TrendChart from '../components/TrendChart';
+import Heatmap from '../components/Heatmap';
+import { FilterPanel, ElasticityChart } from '../components/RoutePanel';
+import BacktestPanel from '../components/BacktestPanel';
+import FestivalsTab from '../components/FestivalsTab';
+import MyRoutesTab from '../components/MyRoutesTab';
+import { Loading, ErrorState, Panel, inr } from '../components/ui';
+import { getBrowserId } from '../lib/browserId';
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell,
-} from 'recharts';
-import {
-  getDashboardSummary, getIndexHistory, getRoutes, getAnomalies, getRegions,
-  type DashboardSummary, type IndexHistory, type RouteRow, type AnomalyRow,
+  getMeta, getIndexDaily, getIndexForecast, getHeatmap, getRouteTrend, getFaresRaw, getRouteAlerts,
+  type Meta, type IndexDaily, type IndexForecast, type Heatmap as HeatmapData, type RouteTrend, type FareRecord, type RouteAlerts,
 } from '../services/api';
-import {
-  Panel, StatCard, Loading, ErrorState, EmptyState, SEVERITY, inr,
-  ACCENT, ACCENT_2, GRID, AXIS_INK, tooltipStyle, SERIES,
-} from '../components/ui';
+
+// Local-date ISO string (toISOString() is UTC and shifts the day in IST).
+const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Short, non-blocking scroll-in for dashboard sections (React Bits FadeContent).
+const Section = ({ children }: { children: React.ReactNode }) => (
+  <FadeContent duration={450} threshold={0.05} initialOpacity={0}>{children}</FadeContent>
+);
 
 export default function Dashboard() {
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [history, setHistory] = useState<IndexHistory | null>(null);
-  const [routes, setRoutes] = useState<RouteRow[]>([]);
-  const [anomalies, setAnomalies] = useState<AnomalyRow[]>([]);
-  const [regions, setRegions] = useState<{ region: string; index_value: number; route_count: number }[]>([]);
+  const [tab, setTab] = useState<Tab>('overview');
+  const [meta, setMeta] = useState<Meta | null>(null);
+  const [daily, setDaily] = useState<IndexDaily | null>(null);
+  const [forecast, setForecast] = useState<IndexForecast | null>(null);
+  const [heatmap, setHeatmap] = useState<HeatmapData | null>(null);
+  const [route, setRoute] = useState('DEL-BOM');
+  const [trend, setTrend] = useState<RouteTrend | null>(null);
+  const [fares, setFares] = useState<{ records: FareRecord[]; total: number }>({ records: [], total: 0 });
+  const [dateFrom, setDateFrom] = useState(iso(new Date()));
+  const [dateTo, setDateTo] = useState(iso(new Date(Date.now() + 60 * 864e5)));
+  const [nonstop, setNonstop] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [browserId] = useState(getBrowserId);
+  const [alerts, setAlerts] = useState<RouteAlerts | null>(null);
+  const [bannerDismissed, setBannerDismissed] = useState(false);
 
+  // Global data — one fetch on mount.
   useEffect(() => {
     (async () => {
       try {
-        const [s, h, r, a, g] = await Promise.all([
-          getDashboardSummary(), getIndexHistory(), getRoutes(), getAnomalies(), getRegions(),
-        ]);
-        setSummary(s); setHistory(h); setRoutes(r.routes);
-        setAnomalies(a.anomalies); setRegions(g.regions);
+        const [m, d, f, h] = await Promise.all([getMeta(), getIndexDaily(), getIndexForecast(5), getHeatmap()]);
+        setMeta(m); setDaily(d); setForecast(f); setHeatmap(h);
+        if (!m.routes.includes(route)) setRoute(m.routes[0]);
+        // Low-price check for this browser's saved routes (drives the banner + tab badge).
+        getRouteAlerts(browserId).then(setAlerts).catch(() => {});
       } catch (e: any) {
         setError(e?.response?.data?.detail ?? e?.message ?? 'Unable to reach the API.');
       } finally { setLoading(false); }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (loading) return <Loading label="Calculating airfare index…" />;
-  if (error || !summary) return <ErrorState message={error ?? 'No data'} />;
-
-  const trend = (history?.periods ?? []).map((p, i) => ({ period: p, index: history!.values[i] }));
-  const basket = routes.filter(r => r.contribution != null)
-    .sort((a, b) => (b.contribution ?? 0) - (a.contribution ?? 0));
+  // Route-scoped data — refetch when the filter changes.
+  useEffect(() => {
+    let alive = true;
+    setTrend(null);
+    getRouteTrend(route).then(t => alive && setTrend(t)).catch(() => {});
+    getFaresRaw({ route, date_from: dateFrom, date_to: dateTo, nonstop_only: nonstop, limit: 15 })
+      .then(r => alive && setFares({ records: r.records, total: r.total })).catch(() => {});
+    return () => { alive = false; };
+  }, [route, dateFrom, dateTo, nonstop]);
 
   return (
-    <div className="space-y-6">
-      <header>
-        <h1 className="text-[26px] font-semibold tracking-tight text-white">National Airfare Overview</h1>
-        <p className="text-[13.5px] text-white/45 mt-1">
-          Base {summary.base_period} = 100 · Current period {summary.calculation_period} ·
-          Last calculated {new Date(summary.last_updated).toLocaleString('en-IN')}
-        </p>
-      </header>
-
-      <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard label="Airfare Index" value={summary.current_index} decimals={1} delta={summary.index_change} />
-        <StatCard label="Routes in Basket" value={summary.routes_covered} />
-        <StatCard label="Airlines Covered" value={summary.airlines_covered} />
-        <StatCard
-          label="Data Quality" value={summary.data_quality_score * 100} decimals={0} suffix="%"
-          footnote={`${summary.observations_count.toLocaleString('en-IN')} observations in period`}
-        />
+    <div className="relative min-h-screen">
+      <div className="fixed inset-0 -z-10 opacity-50 pointer-events-none">
+        <Aurora colorStops={['#5227FF', '#22d3ee', '#7c5cff']} amplitude={0.9} blend={0.6} speed={0.5} />
       </div>
+      <div className="fixed inset-0 -z-10 bg-gradient-to-b from-[#07070c]/30 via-[#07070c]/80 to-[#07070c] pointer-events-none" />
 
-      <Panel title="National Airfare Index" subtitle={`Weighted fixed-basket index, ${history?.base_period} = 100`}>
-        {trend.length === 0 ? <EmptyState message="No index history yet." /> : (
-          <ResponsiveContainer width="100%" height={300}>
-            <AreaChart data={trend} margin={{ top: 8, right: 12, bottom: 4, left: 0 }}>
-              <defs>
-                <linearGradient id="idxFill" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={ACCENT} stopOpacity={0.45} />
-                  <stop offset="100%" stopColor={ACCENT} stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid stroke={GRID} vertical={false} />
-              <XAxis dataKey="period" stroke={GRID} tick={{ fill: AXIS_INK, fontSize: 12 }} tickLine={false} />
-              <YAxis
-                stroke={GRID} width={50}
-                domain={[(m: number) => Math.floor((m - 2) / 5) * 5, (m: number) => Math.ceil((m + 2) / 5) * 5]}
-                tickFormatter={(v: number) => v.toFixed(0)}
-                tick={{ fill: AXIS_INK, fontSize: 12 }} tickLine={false}
-              />
-              <Tooltip contentStyle={tooltipStyle} formatter={(v: number) => [v.toFixed(2), 'Index']} />
-              <Area type="monotone" dataKey="index" stroke={ACCENT} strokeWidth={2.5}
-                fill="url(#idxFill)" dot={{ r: 3, fill: ACCENT }} activeDot={{ r: 6 }} />
-            </AreaChart>
-          </ResponsiveContainer>
+      <TopBar meta={meta} tab={tab} onTab={setTab} alertCount={alerts?.alerts.filter(a => a.is_cheap).length ?? 0} />
+
+      <main className="max-w-[1400px] mx-auto px-4 md:px-8 py-6 md:py-8 space-y-5">
+        {loading && <Loading label="Loading airfare index…" />}
+        {!loading && (error || !daily || !heatmap || !meta) && (
+          <ErrorState message={error ?? 'No data returned. Is the backend running on :8000?'} />
         )}
-      </Panel>
 
-      <div className="grid lg:grid-cols-2 gap-6">
-        <Panel title="Route Contribution" subtitle={`Weight × price relative, ${summary.calculation_period}`}
-          action={<Link to="/routes" className="text-[12.5px] text-[#9d86ff] hover:text-white">View all →</Link>}>
-          {basket.length === 0 ? <EmptyState message="No basket routes." /> : (
-            <ResponsiveContainer width="100%" height={Math.max(230, basket.length * 26)}>
-              <BarChart data={basket.map(r => ({ route: `${r.origin}–${r.destination}`, contribution: r.contribution ?? 0 }))}
-                layout="vertical" margin={{ top: 4, right: 20, bottom: 4, left: 4 }}>
-                <CartesianGrid stroke={GRID} horizontal={false} />
-                <XAxis type="number" stroke={GRID} tick={{ fill: AXIS_INK, fontSize: 12 }} tickLine={false} />
-                <YAxis type="category" dataKey="route" stroke={GRID} width={88}
-                  tick={{ fill: AXIS_INK, fontSize: 12 }} tickLine={false} />
-                <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} contentStyle={tooltipStyle}
-                  formatter={(v: number) => [v.toFixed(2), 'Contribution']} />
-                <Bar dataKey="contribution" fill={ACCENT} radius={[0, 5, 5, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </Panel>
-
-        <Panel title="Regional Index" subtitle="By route origin region">
-          {regions.length === 0 ? <EmptyState message="No regional data." /> : (
-            <ResponsiveContainer width="100%" height={Math.max(230, regions.length * 48)}>
-              <BarChart data={regions} layout="vertical" margin={{ top: 4, right: 20, bottom: 4, left: 4 }}>
-                <CartesianGrid stroke={GRID} horizontal={false} />
-                <XAxis type="number" domain={[95, 'dataMax + 3']} stroke={GRID}
-                  tick={{ fill: AXIS_INK, fontSize: 12 }} tickLine={false} />
-                <YAxis type="category" dataKey="region" stroke={GRID} width={88}
-                  tick={{ fill: AXIS_INK, fontSize: 12 }} tickLine={false} />
-                <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} contentStyle={tooltipStyle}
-                  formatter={(v: number, _n, p: any) => [`${v.toFixed(2)} (${p.payload.route_count} routes)`, 'Index']} />
-                <Bar dataKey="index_value" radius={[0, 5, 5, 0]}>
-                  {regions.map((_, i) => <Cell key={i} fill={SERIES[i % SERIES.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </Panel>
-      </div>
-
-      <Panel title="Top Flagged Anomalies" subtitle="Largest deviations network-wide — flagged for review, never removed"
-        action={<Link to="/anomalies" className="text-[12.5px] text-[#9d86ff] hover:text-white">View all →</Link>}>
-        {anomalies.length === 0 ? <EmptyState message="No anomalies flagged." /> : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="text-left text-white/40 border-b border-white/10">
-                  <th className="py-2 font-medium">Severity</th>
-                  <th className="py-2 font-medium">Route</th>
-                  <th className="py-2 font-medium text-right">Observed</th>
-                  <th className="py-2 font-medium text-right">Expected</th>
-                  <th className="py-2 font-medium text-right">Deviation</th>
-                </tr>
-              </thead>
-              <tbody>
-                {anomalies.slice(0, 6).map(a => {
-                  const s = SEVERITY[a.severity] ?? { color: AXIS_INK, label: a.severity, icon: '●' };
-                  return (
-                    <tr key={a.id} className="border-b border-white/[0.06]">
-                      <td className="py-2.5">
-                        <span className="inline-flex items-center gap-1.5" style={{ color: s.color }}>
-                          <span aria-hidden>{s.icon}</span><span className="font-medium">{s.label}</span>
-                        </span>
-                      </td>
-                      <td className="py-2.5 text-white/80">{a.route ?? '—'}</td>
-                      <td className="py-2.5 text-right tabular-nums text-white">{inr(a.fare)}</td>
-                      <td className="py-2.5 text-right tabular-nums text-white/55">{inr(a.expected)}</td>
-                      <td className="py-2.5 text-right tabular-nums" style={{ color: s.color }}>
-                        {a.deviation >= 0 ? '+' : ''}{a.deviation.toFixed(1)}%
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        {alerts?.any_cheap && !bannerDismissed && (
+          <div role="status" className="flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-400/30 bg-emerald-400/[0.08] px-4 py-3">
+            <span className="text-[13px] font-semibold text-emerald-200">Low fare today</span>
+            <span className="text-[13px] text-white/80">
+              {alerts.alerts.filter(a => a.is_cheap).map(a => `${a.route} ${inr(a.today_fare ?? 0)} (${a.pct_below_baseline}% below baseline)`).join(' · ')}
+            </span>
+            <button onClick={() => setTab('my-routes')} className="text-[12.5px] text-emerald-200 underline underline-offset-2">View my routes</button>
+            <button onClick={() => setBannerDismissed(true)} className="ml-auto text-white/40 hover:text-white text-[13px]" aria-label="Dismiss">✕</button>
           </div>
         )}
-      </Panel>
+
+        {!loading && meta && tab === 'festivals' && <Section><FestivalsTab routes={meta.routes} /></Section>}
+        {!loading && meta && tab === 'my-routes' && (
+          <Section><MyRoutesTab browserId={browserId} routes={meta.routes} alerts={alerts} onAlertsChange={setAlerts} /></Section>
+        )}
+
+        {!loading && daily && heatmap && meta && tab === 'overview' && (
+          <>
+            <Section><HeroStat daily={daily} meta={meta} /></Section>
+            <Section><TrendChart daily={daily} forecast={forecast} /></Section>
+
+            <Section>
+              <FilterPanel
+                routes={meta.routes} route={route} onRoute={setRoute}
+                dateFrom={dateFrom} dateTo={dateTo} onDates={(f, t) => { setDateFrom(f); setDateTo(t); }}
+                nonstop={nonstop} onNonstop={setNonstop}
+              />
+            </Section>
+
+            <Section>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
+                <Heatmap data={heatmap} selectedRoute={route} onSelectRoute={setRoute} />
+                <ElasticityChart trend={trend} />
+              </div>
+            </Section>
+
+            <Section><BacktestPanel /></Section>
+
+            <Section>
+              <Panel
+                title={`Latest scraped fares · ${route}`}
+                subtitle={`${fares.total} cleaned records from /fares/raw · travel ${dateFrom} → ${dateTo}${nonstop ? ' · nonstop' : ''} · showing ${fares.records.length}`}
+              >
+                {fares.records.length === 0 ? (
+                  <p className="text-[13px] text-white/40 py-6 text-center">No fares in this date range.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-[12.5px]">
+                      <thead className="text-white/40 text-left">
+                        <tr>
+                          {['Flight', 'Airline', 'Travel date', 'Dep', 'Stops', 'Days out', 'Window', 'Total fare', 'Source', 'Scraped'].map(h => (
+                            <th key={h} className="font-medium pb-2 pr-4 whitespace-nowrap">{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="tabular-nums">
+                        {fares.records.map((f, i) => (
+                          <tr key={i} className={`border-t border-white/[0.06] ${f.is_outlier ? 'text-white/35' : 'text-white/80'}`}>
+                            <td className="py-1.5 pr-4 whitespace-nowrap">{f.flight_number ?? f.carrier}</td>
+                            <td className="py-1.5 pr-4 whitespace-nowrap">{f.carrier_name ?? f.carrier}</td>
+                            <td className="py-1.5 pr-4">{f.travel_date}</td>
+                            <td className="py-1.5 pr-4">{f.departure_time ?? '—'}</td>
+                            <td className="py-1.5 pr-4">{f.stops == null ? '—' : f.stops === 0 ? 'Nonstop' : `${f.stops} stop`}</td>
+                            <td className="py-1.5 pr-4">{f.advance_purchase_days}</td>
+                            <td className="py-1.5 pr-4">{f.advance_purchase_window}</td>
+                            <td className="py-1.5 pr-4 font-semibold text-white">
+                              {inr(f.total_fare)}{f.is_outlier && <span className="ml-1 text-[10px] text-amber-300/80">outlier</span>}
+                            </td>
+                            <td className="py-1.5 pr-4">{f.source}</td>
+                            <td className="py-1.5 pr-4 text-white/45 whitespace-nowrap">{f.scraped_at.replace('T', ' ')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </Panel>
+            </Section>
+
+            <footer className="pt-2 pb-6 text-[11.5px] text-white/30">
+              Prototype for SIH 2026 · MoSPI PS · Not an official statistic. Data mode: <b>{meta.data_mode}</b>
+              {meta.snapshot_at && <> · latest real snapshot {meta.snapshot_at.replace('T', ' ')}</>}
+              {meta.n_synthetic_days > 0 && <> · {meta.n_synthetic_days} seeded history days are synthetic and disclosed in the chart</>}.
+            </footer>
+          </>
+        )}
+      </main>
     </div>
   );
 }

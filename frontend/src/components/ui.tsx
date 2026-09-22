@@ -2,29 +2,40 @@ import type { ReactNode } from 'react';
 import CountUp from './reactbits/CountUp';
 import SpotlightCard from './reactbits/SpotlightCard';
 
+// Brand chrome (buttons, active tabs, spotlight) — not used for data series.
 export const ACCENT = '#7c5cff';
-export const ACCENT_2 = '#22d3ee';
-export const GRID = 'rgba(255,255,255,0.07)';
-export const AXIS_INK = '#6b6b85';
 
-export const SERIES = ['#7c5cff', '#22d3ee', '#f0a020', '#ff5c8a', '#3ddc91', '#5c9dff'];
+// Data-series colors: validated dark-mode categorical slots (CVD-safe adjacent pairs).
+export const SERIES = {
+  blue: '#3987e5',    // slot 1 — index, actual fares
+  orange: '#d95926',  // slot 2 — predicted / model overlay
+  aqua: '#199e70',    // slot 3 — DGCA reference
+  violet: '#9085e9',
+} as const;
 
-export const SEVERITY: Record<string, { color: string; label: string; icon: string }> = {
-  CRITICAL_ANOMALY: { color: '#ff4d6d', label: 'Critical', icon: '▲' },
-  HIGH_ANOMALY: { color: '#ff9f43', label: 'High', icon: '▲' },
-  LOW_ANOMALY: { color: '#ffd23f', label: 'Low', icon: '●' },
-};
+// Status colors are reserved for good/bad meaning only (day-over-day delta, alerts).
+export const STATUS = { good: '#0ca30c', critical: '#d03b3b', warning: '#fab219' } as const;
+
+// Sequential blue ramp for the heatmap, dark-surface end (600) -> light end (200).
+export const SEQ_RAMP = ['#184f95', '#1c5cab', '#256abf', '#2a78d6', '#3987e5', '#5598e7', '#6da7ec', '#86b6ef', '#9ec5f4'];
+
+export const GRID = '#2c2c2a';
+export const AXIS_INK = '#898781';
+export const INK_2 = '#c3c2b7';
 
 export const inr = (n: number) =>
   `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
 
+export const fmtDate = (iso: string) =>
+  new Date(iso + 'T00:00:00').toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+
 export function Panel({
-  title, subtitle, children, className = '', action,
+  title, subtitle, children, className = '', action, id,
 }: {
-  title?: string; subtitle?: string; children: ReactNode; className?: string; action?: ReactNode;
+  title?: string; subtitle?: string; children: ReactNode; className?: string; action?: ReactNode; id?: string;
 }) {
   return (
-    <section className={`glass rounded-2xl p-5 rise ${className}`}>
+    <section id={id} className={`glass rounded-2xl p-5 ${className}`}>
       {(title || action) && (
         <div className="flex items-start justify-between gap-4 mb-4">
           <div>
@@ -40,28 +51,31 @@ export function Panel({
 }
 
 export function StatCard({
-  label, value, decimals = 0, prefix = '', suffix = '', delta, footnote,
+  label, value, decimals = 0, prefix = '', suffix = '', delta, deltaLabel = 'vs yesterday', footnote, children,
 }: {
   label: string; value: number; decimals?: number; prefix?: string; suffix?: string;
-  delta?: number | null; footnote?: string;
+  delta?: number | null; deltaLabel?: string; footnote?: ReactNode; children?: ReactNode;
 }) {
+  const up = (delta ?? 0) >= 0;
   return (
     <SpotlightCard
-      className="!rounded-2xl !border-white/10 !bg-[rgba(19,19,32,0.66)] !p-5 backdrop-blur-xl rise"
+      className="!rounded-2xl !border-white/10 !bg-[rgba(19,19,32,0.66)] !p-5 backdrop-blur-xl"
       spotlightColor="rgba(124, 92, 255, 0.22)"
     >
       <p className="text-[11px] font-semibold uppercase tracking-[0.13em] text-white/40">{label}</p>
-      <p className="mt-2 text-[34px] leading-none font-semibold text-white">
+      <p className="mt-2 text-[38px] leading-none font-semibold text-white">
         {prefix}
         <CountUp to={Number(value.toFixed(decimals))} duration={1.1} separator="," />
         {suffix}
       </p>
       {delta != null && (
-        <p className="mt-2 text-[13px]" style={{ color: delta >= 0 ? '#3ddc91' : '#ff4d6d' }}>
-          {delta >= 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(2)}% vs prior period
+        <p className="mt-2 text-[13px] font-medium" style={{ color: up ? STATUS.good : STATUS.critical }}>
+          <span aria-hidden>{up ? '▲' : '▼'}</span> {Math.abs(delta).toFixed(2)}%
+          <span className="text-white/40 font-normal"> {deltaLabel}</span>
         </p>
       )}
       {footnote && <p className="mt-2 text-[12px] text-white/35">{footnote}</p>}
+      {children}
     </SpotlightCard>
   );
 }
@@ -88,8 +102,21 @@ export function EmptyState({ message }: { message: string }) {
   return <p className="text-[13px] text-white/40 text-center py-12">{message}</p>;
 }
 
+export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: 'neutral' | 'warn' | 'good' }) {
+  const cls = {
+    neutral: 'bg-white/[0.06] text-white/60 border-white/10',
+    warn: 'bg-amber-400/15 text-amber-300 border-amber-400/25',
+    good: 'bg-emerald-400/15 text-emerald-300 border-emerald-400/25',
+  }[tone];
+  return (
+    <span className={`inline-block text-[10px] font-semibold tracking-wide px-2 py-1 rounded border ${cls}`}>
+      {children}
+    </span>
+  );
+}
+
 export const tooltipStyle = {
-  background: 'rgba(14,14,24,0.95)',
+  background: 'rgba(14,14,24,0.96)',
   border: '1px solid rgba(255,255,255,0.12)',
   borderRadius: 10,
   fontSize: 13,
