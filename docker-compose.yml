@@ -1,0 +1,39 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      CORS_ORIGINS: "http://localhost:5173,http://127.0.0.1:5173"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      # Live-reload source + reuse the SQLite store / snapshots already on the host,
+      # so the container serves the same data `python -m pipeline.run_all` built locally.
+      - ./backend:/app/backend
+      - ./pipeline:/app/pipeline
+      - ./data:/app/data
+    command:
+      [
+        "python", "-m", "uvicorn", "backend.main:app",
+        "--host", "0.0.0.0", "--port", "8000",
+        "--reload", "--reload-dir", "backend", "--reload-dir", "pipeline",
+      ]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:5173"
+    environment:
+      # The browser (not the container) calls this, so it must be a host-reachable URL.
+      VITE_API_BASE_URL: http://localhost:8000
+    depends_on:
+      - backend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
