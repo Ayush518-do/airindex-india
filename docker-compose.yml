@@ -34,6 +34,10 @@ services:
       VITE_API_BASE_URL: http://localhost:8000
     depends_on:
       - backend
+    # Vite reads stdin for its interactive shortcuts and shuts down on EOF,
+    # which kills the dev server in a detached container. Feed it a pipe that
+    # never closes (and isn't a TTY, so shortcut mode stays off).
+    command: ["sh", "-c", "tail -f /dev/null | npx vite --host 0.0.0.0"]
     volumes:
       - ./frontend:/app
       - /app/node_modules

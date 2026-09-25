@@ -5,6 +5,9 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
-    host: true
+    host: true,
+    // Docker bind-mounts on Windows don't deliver inotify events into the
+    // container, so Vite silently misses host-side edits. Poll instead.
+    watch: { usePolling: true, interval: 300 }
   }
 })
