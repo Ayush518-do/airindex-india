@@ -18,10 +18,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from pipeline.db import ROOT
+from pipeline.db import INDEX_FILTER, ROOT
 
 REF_PATH = ROOT / "data" / "reference" / "dgca_reference_fares.json"
-FILTER = "stops = 0 AND fare_class = 'economy' AND is_outlier = 0 AND in_basket = 1"
 
 
 def load_reference() -> dict:
@@ -29,11 +28,16 @@ def load_reference() -> dict:
 
 
 def compute(conn, include_synthetic: bool = False) -> dict:
+    # Superseded by pipeline.official_compare, which measures against real
+    # MoSPI data instead of the illustrative reference table. Kept only so the
+    # existing /backtest/dgca route keeps working until the UI moves over.
     ref = load_reference()
+    # INDEX_FILTER already drops synthetic rows in live mode; this clause only
+    # matters in demo mode, where the caller may still want them separated.
     synth_clause = "" if include_synthetic else " AND is_synthetic = 0"
     rows = conn.execute(
         f"SELECT substr(scrape_date, 1, 7) AS month, route, AVG(total_fare) AS avg_fare, COUNT(*) AS n, "
-        f"SUM(is_synthetic) AS n_synth FROM fares WHERE {FILTER}{synth_clause} GROUP BY month, route"
+        f"SUM(is_synthetic) AS n_synth FROM fares WHERE {INDEX_FILTER}{synth_clause} GROUP BY month, route"
     ).fetchall()
     ours: dict[str, dict[str, dict]] = {}
     for r in rows:

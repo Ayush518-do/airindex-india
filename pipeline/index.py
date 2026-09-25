@@ -20,7 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from pipeline.db import session
+from pipeline.db import INDEX_FILTER, session
 
 log = logging.getLogger("pipeline.index")
 
@@ -37,8 +37,6 @@ ROUTE_WEIGHTS: dict[str, float] = {
 }
 WINDOWS = ["0-3", "4-7", "8-14", "15-30", "31-60"]
 
-# Only comparable product goes into the index: nonstop, economy, non-outlier.
-INDEX_FILTER = "stops = 0 AND fare_class = 'economy' AND is_outlier = 0 AND in_basket = 1"
 
 
 def compute_route_daily(conn) -> int:
@@ -47,6 +45,7 @@ def compute_route_daily(conn) -> int:
     rows = conn.execute(f"""
         SELECT scrape_date AS date, route, advance_purchase_window AS window,
                AVG(total_fare) AS avg_fare, MIN(total_fare) AS min_fare, COUNT(*) AS n,
+               MIN(is_synthetic) AS all_synth,
                GROUP_CONCAT(total_fare) AS fares
         FROM fares
         WHERE {INDEX_FILTER}
@@ -57,9 +56,11 @@ def compute_route_daily(conn) -> int:
         fares = sorted(float(x) for x in r["fares"].split(","))
         mid = len(fares) // 2
         median = fares[mid] if len(fares) % 2 else (fares[mid - 1] + fares[mid]) / 2
-        out.append((r["date"], r["route"], r["window"], round(r["avg_fare"], 2), round(median, 2), r["min_fare"], r["n"]))
+        out.append((r["date"], r["route"], r["window"], round(r["avg_fare"], 2), round(median, 2),
+                    r["min_fare"], r["n"], r["all_synth"]))
     conn.executemany(
-        "INSERT INTO route_daily (date, route, window, avg_fare, median_fare, min_fare, n) VALUES (?,?,?,?,?,?,?)", out
+        "INSERT INTO route_daily (date, route, window, avg_fare, median_fare, min_fare, n, is_synthetic)"
+        " VALUES (?,?,?,?,?,?,?,?)", out
     )
     return len(out)
 

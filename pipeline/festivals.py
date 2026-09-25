@@ -18,7 +18,7 @@ import logging
 from datetime import date
 from typing import Iterable
 
-from pipeline.db import session
+from pipeline.db import MODEL_FILTER, session
 
 log = logging.getLogger("pipeline.festivals")
 
@@ -60,12 +60,11 @@ def tag(dates: Iterable[str]) -> list[str | None]:
     return [festival_for(d) for d in dates]
 
 
-INDEX_FILTER = "stops = 0 AND fare_class = 'economy' AND is_outlier = 0 AND is_synthetic = 0"
 
 
 def compute_surge(conn) -> dict:
     rows = conn.execute(
-        f"SELECT route, advance_purchase_window AS window, travel_date, total_fare FROM fares WHERE {INDEX_FILTER}"
+        f"SELECT route, advance_purchase_window AS window, travel_date, total_fare FROM fares WHERE {MODEL_FILTER}"
     ).fetchall()
 
     # normal cell means and festival buckets

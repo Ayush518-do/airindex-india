@@ -7,12 +7,20 @@ Run from the repo root:
 Swagger UI: http://localhost:8000/docs
 
 Data source: the SQLite store built by `python -m pipeline.run_all` from the
-cached raw snapshots in data/raw/. The API never triggers a live scrape. If the
-store is empty it falls back to backend/fake_data.py so the UI always renders.
+cached raw snapshots in data/raw/. The API never triggers a live scrape.
+
+There is no fake-data fallback. When something genuinely has no data yet the
+endpoint says so — `{"available": false, "reason": ...}` with a 200, because
+"not enough history" is a normal state of a young index, not a server error.
+Serving invented numbers that look real is the one thing this API must not do.
+
+DEMO_MODE (see pipeline.db) points the whole app at a separate seeded database
+for presentations; /meta reports which mode is live so the UI can badge it.
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from datetime import datetime
@@ -23,10 +31,9 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field
 
-from backend import fake_data
-from pipeline import backtest, fare_model, festivals
+from pipeline import backtest, fare_model, festivals, official_compare
 from pipeline import index as index_engine
-from pipeline.db import DB_PATH, connect, init_db
+from pipeline.db import DATA_MODE, DB_PATH, DEMO_MODE, assert_mode_consistent, connect, init_db
 from pipeline.trend_forecast import linear_forecast
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -64,11 +71,30 @@ def get_db():
 
 @app.on_event("startup")
 def _startup():
+    assert_mode_consistent()
     init_db(connect()).close()
+    logging.getLogger("uvicorn.error").warning(
+        "AIRINDEX starting in %s mode -> %s", DATA_MODE.upper(), DB_PATH.name
+    )
+
+
+MIN_FORECAST_DAYS = 10   # matches trend_forecast.LOOKBACK_DAYS
 
 
 def _has_snapshot_data(conn: sqlite3.Connection) -> bool:
     return conn.execute("SELECT COUNT(*) FROM index_daily").fetchone()[0] > 0
+
+
+def _unavailable(reason: str, message: str, **shape) -> dict:
+    """
+    A 200 that honestly says "nothing here yet".
+
+    Empty is a normal state for a young index, not a failure, so it should not
+    look like one to the client. `shape` carries the same keys the populated
+    response would have (empty lists, nulls) so callers can render without
+    branching on every field.
+    """
+    return {"available": False, "reason": reason, "message": message, **shape}
 
 
 def _provenance(conn: sqlite3.Connection) -> dict:
@@ -119,14 +145,16 @@ def health():
 @app.get("/meta", tags=["meta"])
 def meta(conn: sqlite3.Connection = Depends(get_db)):
     """Routes, windows, carriers, and the provenance of the data backing the API."""
-    live = _has_snapshot_data(conn)
-    prov = _provenance(conn) if live else {"snapshot_at": None, "sources": [], "db_path": None}
-    daily = index_engine.get_index_daily(conn) if live else None
+    has_data = _has_snapshot_data(conn)
+    prov = _provenance(conn) if has_data else {"snapshot_at": None, "sources": [], "db_path": None}
+    daily = index_engine.get_index_daily(conn) if has_data else None
     carriers = [r[0] for r in conn.execute(
-        "SELECT carrier FROM fares WHERE is_synthetic = 0 GROUP BY carrier ORDER BY COUNT(*) DESC LIMIT 8"
-    )] if live else fake_data.CARRIERS
+        "SELECT carrier FROM fares GROUP BY carrier ORDER BY COUNT(*) DESC LIMIT 8"
+    )] if has_data else []
     return {
-        "data_mode": "snapshot" if live else "fake",
+        "data_mode": DATA_MODE,
+        "demo_mode": DEMO_MODE,
+        "has_data": has_data,
         "routes": ROUTES,
         "weights": index_engine.ROUTE_WEIGHTS,
         "windows": index_engine.WINDOWS,
@@ -144,16 +172,24 @@ def meta(conn: sqlite3.Connection = Depends(get_db)):
 def index_daily(conn: sqlite3.Connection = Depends(get_db)):
     """Daily APIx value. First captured day = 100. `is_synthetic` marks seeded demo history."""
     if not _has_snapshot_data(conn):
-        return fake_data.fake_index_daily()
-    return index_engine.get_index_daily(conn)
+        return _unavailable("no_index_data", "No scrape days have been processed yet.",
+                            index_name=index_engine.INDEX_NAME, points=[], latest=None)
+    return {"available": True, **index_engine.get_index_daily(conn)}
 
 
 @app.get("/index/forecast", tags=["index"])
 def index_forecast(days: int = Query(5, ge=3, le=7), conn: sqlite3.Connection = Depends(get_db)):
     """Linear-trend extrapolation of the last 10 index values with a 95% residual band."""
-    if not _has_snapshot_data(conn):
-        return fake_data.fake_forecast(days)
-    return linear_forecast(index_engine.get_index_daily(conn)["points"], horizon=days)
+    points = index_engine.get_index_daily(conn)["points"] if _has_snapshot_data(conn) else []
+    if len(points) < MIN_FORECAST_DAYS:
+        # A trend line through one or two points is not a forecast, it is a
+        # guess with error bars drawn on. Say what is missing instead.
+        return _unavailable(
+            "insufficient_history",
+            f"A forecast needs at least {MIN_FORECAST_DAYS} index days; the scraper has produced {len(points)}.",
+            have=len(points), need=MIN_FORECAST_DAYS, points=[],
+        )
+    return {"available": True, **linear_forecast(points, horizon=days)}
 
 
 @app.get("/index/heatmap", tags=["index"])
@@ -161,8 +197,9 @@ def index_heatmap(date: str | None = Query(None, description="YYYY-MM-DD scrape 
                   conn: sqlite3.Connection = Depends(get_db)):
     """Average nonstop economy fare per route x advance-purchase window."""
     if not _has_snapshot_data(conn):
-        return fake_data.fake_heatmap()
-    return index_engine.get_heatmap(conn, date)
+        return _unavailable("no_index_data", "No scrape days have been processed yet.",
+                            routes=ROUTES, windows=index_engine.WINDOWS, cells=[])
+    return {"available": True, **index_engine.get_heatmap(conn, date)}
 
 
 # --------------------------------------------------------------------------- #
@@ -173,7 +210,8 @@ def route_trend(route: str, conn: sqlite3.Connection = Depends(get_db)):
     """Fare by advance-purchase window for one route, with predicted-vs-actual overlay."""
     route = _validate_route(route)
     if not _has_snapshot_data(conn):
-        return fake_data.fake_route_trend(route)
+        return _unavailable("no_index_data", "No scrape days have been processed yet.",
+                            route=route, windows=[], carriers=[])
     trend = index_engine.get_route_trend(conn, route)
     if trend["date"]:
         overlay = fare_model.overlay_for_route(conn, route, trend["date"])
@@ -181,7 +219,7 @@ def route_trend(route: str, conn: sqlite3.Connection = Depends(get_db)):
             w["predicted_avg"] = overlay.get(w["window"])
         m = fare_model.load()
         trend["model"] = {k: v for k, v in m["meta"].items() if k != "features"} if m else None
-    return trend
+    return {"available": True, **trend}
 
 
 class PredictResponse(BaseModel):
@@ -232,10 +270,8 @@ def fares_raw(
 ):
     """Cleaned fare records (the `fares` table), filterable by route, travel date and scrape day."""
     if not _has_snapshot_data(conn):
-        data = fake_data.fake_fares_raw(_validate_route(route) if route else None, limit=5000)
-        recs = [r for r in data["records"]
-                if (not date_from or r["travel_date"] >= date_from) and (not date_to or r["travel_date"] <= date_to)]
-        return {"count": len(recs[offset:offset + limit]), "total": len(recs), "records": recs[offset:offset + limit]}
+        return _unavailable("no_index_data", "No scrape days have been processed yet.",
+                            count=0, total=0, records=[])
 
     where, params = ["1=1"], []
     if route:
@@ -247,10 +283,10 @@ def fares_raw(
     if scrape_date:
         where.append("scrape_date = ?"); params.append(scrape_date)
     else:
-        where.append("scrape_date = (SELECT MAX(scrape_date) FROM fares WHERE is_synthetic = 0)")
+        where.append("scrape_date = (SELECT MAX(scrape_date) FROM fares)")
     if nonstop_only:
         where.append("stops = 0")
-    if not include_synthetic:
+    if not include_synthetic and not DEMO_MODE:
         where.append("is_synthetic = 0")
     sql = " AND ".join(where)
     total = conn.execute(f"SELECT COUNT(*) FROM fares WHERE {sql}", params).fetchone()[0]
@@ -265,7 +301,52 @@ def fares_raw(
 
 
 # --------------------------------------------------------------------------- #
-# Back-test
+# Official statistics (MoSPI)
+# --------------------------------------------------------------------------- #
+@app.get("/official/cpi", tags=["official"])
+def official_cpi(
+    level: str = Query("Item", pattern="^(Item|SubGroup)$"),
+    sector: str = Query("All", pattern="^(All|Rural|Urban|Combined)$"),
+    date_from: str | None = Query(None, description="YYYY-MM (period >=)"),
+    date_to: str | None = Query(None, description="YYYY-MM (period <=)"),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """Official CPI series as fetched from MoSPI eSankhyiki."""
+    where, params = ["level = ?", "sector = ?"], [level, sector]
+    if date_from:
+        where.append("period >= ?"); params.append(date_from)
+    if date_to:
+        where.append("period <= ?"); params.append(date_to)
+    rows = conn.execute(
+        f"SELECT period, year, month, index_value, inflation, item_code, item_name, status "
+        f"FROM official_cpi WHERE {' AND '.join(where)} ORDER BY period", params
+    ).fetchall()
+    if not rows:
+        return _unavailable("no_official_data",
+                            "Official CPI has not been fetched yet — run `python -m pipeline.mospi`.",
+                            level=level, sector=sector, points=[])
+    return {
+        "available": True,
+        "source": "MoSPI eSankhyiki (api.mospi.gov.in)",
+        "level": level, "sector": sector,
+        "item_name": rows[0]["item_name"], "item_code": rows[0]["item_code"],
+        "n_months": len(rows),
+        "points": [
+            {"period": r["period"], "index": r["index_value"],
+             "inflation_pct": r["inflation"], "status": r["status"]}
+            for r in rows
+        ],
+    }
+
+
+@app.get("/official/compare", tags=["official"])
+def official_comparison(conn: sqlite3.Connection = Depends(get_db)):
+    """Official CPI airfare vs APIx: the scale link, overlap statistics, and the CPI seasonal profile."""
+    return official_compare.compute(conn)
+
+
+# --------------------------------------------------------------------------- #
+# Back-test (superseded by /official/compare; removed once the UI moves over)
 # --------------------------------------------------------------------------- #
 @app.get("/backtest/dgca", tags=["index"])
 def backtest_dgca(include_synthetic: bool = Query(False), conn: sqlite3.Connection = Depends(get_db)):
@@ -282,8 +363,9 @@ def backtest_dgca(include_synthetic: bool = Query(False), conn: sqlite3.Connecti
 def festivals_surge(conn: sqlite3.Connection = Depends(get_db)):
     """Festival vs normal mean fare per route (same advance-purchase window mix), real records only."""
     if not _has_snapshot_data(conn):
-        return fake_data.fake_festival_surge()
-    return festivals.compute_surge(conn)
+        return _unavailable("no_index_data", "No scrape days have been processed yet.",
+                            festivals=festivals.FESTIVALS, surge=[], n_records=0)
+    return {"available": True, **festivals.compute_surge(conn)}
 
 
 @app.get("/festivals/calendar", tags=["festivals"])

@@ -11,8 +11,9 @@ data/models/fare_model.pkl with hold-out metrics. Used for:
   * /routes/{r}/trend  — predicted-vs-actual overlay (mean prediction per
                          window over the very records that were scraped)
 
-Synthetic backfill records are included in training when present (the demo
-needs variation across travel dates); the metadata reports how many.
+Training uses MODEL_FILTER, which excludes synthetic rows in live mode; the
+metadata still reports the real/synthetic split so a demo-mode model is never
+mistaken for one trained on real fares.
 """
 from __future__ import annotations
 
@@ -30,7 +31,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
-from pipeline.db import ROOT, session
+from pipeline.db import MODEL_FILTER, ROOT, session
 from pipeline.festivals import is_festival
 
 log = logging.getLogger("pipeline.fare_model")
@@ -41,7 +42,6 @@ MODEL_PATH = MODEL_DIR / "fare_model.pkl"
 
 CAT = ["route", "carrier", "advance_purchase_window"]
 NUM = ["days_to_departure", "day_of_week", "is_weekend", "is_festival_season"]
-TRAIN_FILTER = "stops = 0 AND fare_class = 'economy' AND is_outlier = 0"
 
 
 def _window_for(days: int) -> str:
@@ -65,7 +65,7 @@ def featurize(route: str, carrier: str, travel_date: date | str, scrape_date: da
 
 def _load_frame(conn) -> pd.DataFrame:
     df = pd.read_sql_query(
-        f"SELECT route, carrier, travel_date, scrape_date, total_fare, is_synthetic FROM fares WHERE {TRAIN_FILTER}", conn
+        f"SELECT route, carrier, travel_date, scrape_date, total_fare, is_synthetic FROM fares WHERE {MODEL_FILTER}", conn
     )
     if df.empty:
         return df
@@ -147,7 +147,7 @@ def overlay_for_route(conn, route: str, scrape_date: str) -> dict[str, float]:
     """Mean model prediction per advance-purchase window over the scraped records of that day."""
     rows = conn.execute(
         f"SELECT carrier, travel_date, advance_purchase_window AS window FROM fares "
-        f"WHERE route = ? AND scrape_date = ? AND {TRAIN_FILTER}", (route, scrape_date)
+        f"WHERE route = ? AND scrape_date = ? AND {MODEL_FILTER}", (route, scrape_date)
     ).fetchall()
     if not rows:
         return {}

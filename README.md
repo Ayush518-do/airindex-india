@@ -48,6 +48,43 @@ The app reads only from `data/processed/airindex.db`, which is built from the JS
 in `data/raw/`. **It never depends on a live scrape**, so the demo works offline and cannot
 be broken by a site blocking us.
 
+### Official CPI (MoSPI)
+
+```bash
+python -m pipeline.mospi                 # refresh 2014..now (no API key needed)
+python -m pipeline.mospi --years 2025 2026
+```
+
+Pulls the Consumer Price Index item **"Air Fare (normal): Economy Class(adult)"**
+(`6.1.03.3.2.07.0`, base year 2012) and its parent sub-group *Transport and
+Communication*, from `api.mospi.gov.in`. The item is an economy-class airfare
+index, which is what APIx measures too, so the two are directly comparable.
+
+Codes are resolved **by name at runtime**, never hardcoded — if MoSPI renames or
+withdraws the item the fetch fails loudly rather than silently binding to the
+wrong series.
+
+Two limits worth knowing: only base year 2012 carries item-level data, and the
+item has no sector breakdown upstream (all three sector codes return identical
+values), so it is stored once as `sector='All'`. The sub-group does have real
+Rural/Urban/Combined splits.
+
+### Demo mode
+
+The live index only grows in wall-clock time, so a fresh install has very little
+history. For presentations:
+
+```bash
+python scripts/build_demo_db.py          # writes data/processed/airindex_demo.db
+DEMO_MODE=1 python -m uvicorn backend.main:app --port 8000
+# or: DEMO_MODE=1 docker compose up -d backend
+```
+
+Demo data lives in a **separate database file**, never the live one — isolation
+rather than filtering, so no missed `WHERE` clause can leak seeded fares into
+real output. The UI shows a "DEMO DATA — NOT REAL FARES" badge whenever it is
+on, and the API reports `data_mode: "demo"` at `/meta`.
+
 ### Refreshing data
 
 ```bash
@@ -162,19 +199,23 @@ scrape days`; cheap if `today < 0.85 × baseline`. One email per route per 24 h
 
 ## Honesty notes
 
-* **Seeded history.** A daily index needs many scrape days; this repo was built in one.
-  `python -m scraper.backfill` writes synthetic past-day snapshots *anchored to the real
-  fare levels* so a 3-week trend can be shown. They are marked `synthetic: true` in the
-  file, `is_synthetic = 1` on every row and every index day, counted in `/meta` and
-  `/index/daily`, shaded and labelled "seeded history" in the chart, and badged on the hero
-  card. `python -m scraper.backfill --purge` removes them; the scheduler never writes a
-  synthetic day where a real one exists.
-* **Reference table.** DGCA's TMU does not publish route-wise monthly average fares as an
-  open table. `data/reference/dgca_reference_fares.json` therefore ships with
-  `"status": "ILLUSTRATIVE"` placeholder values so the back-test mechanism can be shown;
-  the UI badges this. Replace the numbers with the official figures (same schema, e.g.
-  from a MoCA Parliament reply or the MoSPI CPI "air fare" item index) and set
-  `"status": "OFFICIAL"`.
+* **No synthetic data in live mode.** The live store contains only real scraped fares.
+  There is no fake-data fallback anywhere in the API: an endpoint with nothing to show
+  returns `{"available": false, "reason": ...}` and the UI renders an honest empty state.
+  Seeded fixtures exist only under `tests/fixtures/` and are reachable solely through
+  `DEMO_MODE=1`, which reads a **separate database file** and badges every page.
+* **The index is young.** Real history accumulates only in wall-clock time — a forecast
+  needs 10 scrape days, so a fresh install correctly reports `insufficient_history`
+  rather than drawing a trend line through one point.
+* **Official comparison has no overlap yet.** MoSPI's CPI airfare series ends 2025-12
+  and scraping began 2026-09, so correlation is mathematically undefined today.
+  `/official/compare` reports `pending_overlap` with the month counts, and the scale
+  link is explicitly labelled "no overlapping month yet — anchored to the latest
+  official month". The CPI seasonal profile (12 years of month-over-month moves) is a
+  real comparison that *can* be made now, and is shown instead.
+* **Superseded reference table.** `data/reference/dgca_reference_fares.json` held
+  illustrative placeholder values; `/official/compare` replaces it with real MoSPI data.
+  The old `/backtest/dgca` route remains only until the UI moves over.
 * Only the nonstop economy product is indexed; `base_fare`/`taxes` are unavailable from
   the current sources' result cards.
 
@@ -193,7 +234,9 @@ Swagger UI at **`/docs`** (this is the NSO/RBI-facing interface).
 | GET | `/predict?route=&travel_date=&carrier=` | model fare estimate |
 | GET | `/model/info` | training metadata + hold-out metrics |
 | GET | `/festivals/surge` · `/festivals/calendar` | festival vs normal per route; the calendar |
-| GET | `/backtest/dgca` | scraped levels vs reference table |
+| GET | `/official/cpi` | official MoSPI CPI series (item or sub-group, by sector) |
+| GET | `/official/compare` | official CPI vs APIx: scale link, overlap stats, seasonal profile |
+| GET | `/backtest/dgca` | superseded by `/official/compare`; removed once the UI moves over |
 | POST | `/routes/save` | save a watched route (`browser_id`, origin, destination, preferred_days, email) |
 | GET | `/routes/saved/{browser_id}` · DELETE `/routes/saved/{browser_id}/{id}` | list / remove |
 | GET | `/routes/{browser_id}/alerts` | is any saved route cheap today |

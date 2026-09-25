@@ -7,8 +7,23 @@ export const API_DOCS_URL = `${API_BASE_URL}/docs`;
 
 // ---------------------------------------------------------------- types ---
 
+/**
+ * Endpoints that can legitimately have nothing to show return
+ * `available: false` with a reason instead of inventing data. Populated
+ * responses carry `available: true` plus the usual fields.
+ */
+export interface Unavailable {
+  available: false;
+  reason: 'no_index_data' | 'insufficient_history' | 'no_official_data' | 'pending_overlap';
+  message: string;
+  have?: number;
+  need?: number;
+}
+
 export interface Meta {
-  data_mode: 'fake' | 'snapshot';
+  data_mode: 'live' | 'demo';
+  demo_mode: boolean;
+  has_data: boolean;
   snapshot_at: string | null;
   routes: string[];
   weights: Record<string, number>;
@@ -30,6 +45,7 @@ export interface IndexPoint {
 }
 
 export interface IndexDaily {
+  available?: boolean;
   index_name: string;
   base_date: string;
   base_value: number;
@@ -48,13 +64,18 @@ export interface ForecastPoint {
 }
 
 export interface IndexForecast {
-  method: string;
-  history_days: number;
-  horizon_days: number;
-  slope_per_day: number;
+  available?: boolean;
+  reason?: string;
+  message?: string;
+  have?: number;
+  need?: number;
+  method?: string;
+  history_days?: number;
+  horizon_days?: number;
+  slope_per_day?: number;
   r2?: number | null;
   residual_se?: number | null;
-  anchor: { date: string; value: number };
+  anchor?: { date: string; value: number };
   points: ForecastPoint[];
 }
 
@@ -66,6 +87,7 @@ export interface HeatmapCell {
 }
 
 export interface Heatmap {
+  available?: boolean;
   routes: string[];
   windows: string[];
   cells: HeatmapCell[];
@@ -82,6 +104,7 @@ export interface RouteWindow {
 }
 
 export interface RouteTrend {
+  available?: boolean;
   route: string;
   date?: string;
   windows: RouteWindow[];
@@ -127,6 +150,7 @@ export interface SurgeRow {
 }
 
 export interface FestivalSurge {
+  available?: boolean;
   festivals: Festival[];
   surge: SurgeRow[];
   n_records?: number;
@@ -172,6 +196,46 @@ export interface Backtest {
   include_synthetic: boolean;
 }
 
+export interface OfficialPoint { period: string; index: number; inflation_pct: number | null; status?: string }
+
+export interface OfficialCpi {
+  available: boolean;
+  source?: string;
+  level?: string;
+  sector?: string;
+  item_name?: string;
+  item_code?: string;
+  n_months?: number;
+  points: OfficialPoint[];
+  reason?: string;
+  message?: string;
+}
+
+export interface OfficialCompare {
+  available: boolean;
+  reason?: string;
+  message?: string;
+  official?: {
+    source: string; item_name: string; base_year: number;
+    first_period: string; latest_period: string; n_months: number;
+    points: OfficialPoint[];
+  };
+  apix?: {
+    n_months: number; first_period: string | null;
+    points: { period: string; value: number; n_days: number; linked_value: number }[];
+  };
+  link?: { period: string; official_index: number; scale: number; basis: string };
+  overlap?: {
+    available: boolean; overlap_months: number; need?: number; reason?: string; message?: string;
+    correlation?: number | null; mae_index_points?: number; mape_pct?: number; periods?: string[];
+  };
+  seasonal?: {
+    note: string; current_month: string;
+    months: { month_num: number; month: string; mean_change_pct: number;
+              min_change_pct: number; max_change_pct: number; n_years: number }[];
+  };
+}
+
 // ---------------------------------------------------------------- calls ---
 
 export const getMeta = () => api.get<Meta>('/meta').then(r => r.data);
@@ -195,6 +259,9 @@ export const deleteSavedRoute = (browserId: string, id: number | string) =>
   api.delete(`/routes/saved/${browserId}/${id}`).then(() => undefined);
 export const getRouteAlerts = (browserId: string) =>
   api.get<RouteAlerts>(`/routes/${browserId}/alerts`).then(r => r.data);
+export const getOfficialCpi = (params?: { level?: string; sector?: string }) =>
+  api.get<OfficialCpi>('/official/cpi', { params }).then(r => r.data);
+export const getOfficialCompare = () => api.get<OfficialCompare>('/official/compare').then(r => r.data);
 export const getBacktest = () => api.get<Backtest>('/backtest/dgca').then(r => r.data);
 export const getPrediction = (params: { route: string; travel_date: string; carrier?: string }) =>
   api.get<Prediction>('/predict', { params }).then(r => r.data);

@@ -27,7 +27,8 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from scraper.base import RAW_DIR, DEFAULT_ROUTES, latest_snapshots
+from pipeline.db import DEMO_RAW_DIR
+from scraper.base import DEFAULT_ROUTES, latest_snapshots
 
 log = logging.getLogger("scraper.backfill")
 
@@ -87,7 +88,11 @@ def _level(mean: dict, route: str, window: str) -> float:
     return FALLBACK_LEVEL[route] * WINDOW_MULT[window]
 
 
-def write(days: int = 21, end: date | None = None) -> list[Path]:
+def write(days: int = 21, end: date | None = None, out_dir: Path | None = None) -> list[Path]:
+    # Defaults to the demo snapshot directory, never data/raw/: a seeded file
+    # sitting next to real scrapes would be ingested by a live rebuild.
+    target = out_dir or DEMO_RAW_DIR
+    target.mkdir(parents=True, exist_ok=True)
     rng = random.Random(SEED)
     mean, n_by_cell, carriers, anchor = _anchor_levels()
     if not anchor:
@@ -139,16 +144,16 @@ def write(days: int = 21, end: date | None = None) -> list[Path]:
             "queries": [], "records": records,
             "note": "SYNTHETIC demo history anchored to real fare levels; not scraped. See README.",
         }
-        path = RAW_DIR / f"synthetic_backfill_{scraped_at.strftime('%Y%m%d_%H%M%S')}.json"
+        path = target / f"synthetic_backfill_{scraped_at.strftime('%Y%m%d_%H%M%S')}.json"
         path.write_text(json.dumps(snap, ensure_ascii=False), encoding="utf-8")
         written.append(path)
     log.info("wrote %d synthetic snapshots (anchored to %s)", len(written), anchor)
     return written
 
 
-def purge() -> int:
+def purge(out_dir: Path | None = None) -> int:
     n = 0
-    for p in RAW_DIR.glob("synthetic_backfill_*.json"):
+    for p in (out_dir or DEMO_RAW_DIR).glob("synthetic_backfill_*.json"):
         p.unlink()
         n += 1
     log.info("deleted %d synthetic snapshots", n)

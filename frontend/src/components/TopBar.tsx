@@ -42,16 +42,20 @@ export default function TopBar({
           ))}
         </nav>
 
-        <div className="hidden md:flex items-center gap-2 pl-3 border-l border-white/[0.07]">
-          {meta && (
-            <Badge tone={meta.data_mode === 'fake' ? 'warn' : 'good'}>
-              {meta.data_mode === 'fake'
-                ? 'FAKE DATA'
-                : `CACHED SNAPSHOT${meta.snapshot_at ? ' · ' + new Date(meta.snapshot_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}`}
+        <div className="flex items-center gap-2 md:pl-3 md:border-l md:border-white/[0.07]">
+          {/* Demo mode must be unmistakable at a glance, on every page and at
+              every width — a demo screenshot should never pass for real output.
+              It is driven solely by meta.demo_mode, never inferred. */}
+          {meta?.demo_mode && <Badge tone="warn">DEMO DATA — NOT REAL FARES</Badge>}
+          {meta && !meta.demo_mode && (
+            <Badge tone={meta.has_data ? 'good' : 'neutral'}>
+              {meta.has_data
+                ? `LIVE${meta.snapshot_at ? ' · ' + new Date(meta.snapshot_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}`
+                : 'NO DATA YET'}
             </Badge>
           )}
           <a href={API_DOCS_URL} target="_blank" rel="noreferrer"
-             className="text-[12px] text-white/50 hover:text-white underline-offset-2 hover:underline">
+             className="hidden md:inline text-[12px] text-white/50 hover:text-white underline-offset-2 hover:underline">
             API docs ↗
           </a>
         </div>

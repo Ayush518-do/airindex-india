@@ -16,7 +16,12 @@ build/
 # data — raw JSON snapshots ARE committed (demo fallback); processed DB is rebuilt
 data/processed/*.db
 data/processed/*.db-journal
+data/processed/*.db-wal
+data/processed/*.db-shm
 data/models/*.pkl
+
+# Cached MoSPI API responses (refetchable: python -m pipeline.mospi)
+data/raw/mospi/
 
 # playwright
 playwright-report/
@@ -27,3 +32,4 @@ test-results/
 .idea/
 .DS_Store
 *.log
+data/raw_demo/

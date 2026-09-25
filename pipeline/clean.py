@@ -16,6 +16,9 @@ Rules
 * in_basket=1 marks records scraped at the fixed basket offsets (2/5/10/21/45
   days out); only those feed the index. Extra festival/control-date scrapes
   are in_basket=0 and feed the model + festival analysis only.
+* Snapshots are read from pipeline.db.RAW_DIR, which is data/raw/ in live mode
+  and data/raw_demo/ in demo mode — seeded fixtures can never be ingested into
+  the live store.
 """
 from __future__ import annotations
 
@@ -27,8 +30,8 @@ from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 
-from pipeline.db import session
-from scraper.base import DEFAULT_OFFSETS, RAW_DIR
+from pipeline.db import RAW_DIR, session
+from scraper.base import DEFAULT_OFFSETS
 
 log = logging.getLogger("pipeline.clean")
 
