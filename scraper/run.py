@@ -13,6 +13,7 @@ import argparse
 import logging
 import sys
 
+from pipeline import timeutil
 from scraper.base import DEFAULT_OFFSETS, DEFAULT_ROUTES
 from scraper.sources import SOURCES
 
@@ -32,7 +33,7 @@ def main(argv=None):
     offsets = [int(x) for x in args.offsets.split(",")] if args.offsets else DEFAULT_OFFSETS
     if args.dates:
         from datetime import date
-        today = date.today()
+        today = timeutil.today()
         offsets = [(date.fromisoformat(d) - today).days for d in args.dates.split(",")]
 
     paths = []

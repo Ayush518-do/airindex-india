@@ -92,8 +92,69 @@ python -m scraper.run                          # scrape all sources, all routes,
 python -m scraper.run --source easemytrip --routes DEL-BOM --offsets 2,10   # quick test
 python -m scraper.run --dates 2026-11-07,2026-10-28   # explicit travel dates (festival vs control)
 python -m pipeline.run_all                     # clean → index → model → festivals → alerts
-python -m scraper.scheduler --every 6h         # do both, forever
 ```
+
+### Keeping the scheduler running
+
+The index only gains history in wall-clock time, so collection has to keep
+happening on its own. `scraper.scheduler` is an APScheduler daemon with a
+persistent job store (`data/processed/jobs.db`):
+
+| Job | When (IST) |
+|---|---|
+| scrape each source | daily 06:00, sources staggered 30 min apart |
+| clean + index + model | daily 08:00 |
+| low-fare alerts | daily 09:00 |
+| official CPI refresh | 15th of each month, 07:00 |
+
+```powershell
+.venv\Scripts\python -m scraper.scheduler            # run in the foreground (Ctrl-C to stop)
+.venv\Scripts\python -m scraper.scheduler --once     # one full cycle now, then exit
+.venv\Scripts\python -m scraper.scheduler --list     # jobs and next run times
+.venv\Scripts\python -m scraper.scheduler --health   # per-source health
+```
+
+**Start it automatically on Windows** (run once, from the repo root):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_scheduler_task.ps1
+```
+
+That registers a Task Scheduler entry that starts the scheduler at logon and
+again at 05:55 daily. It overrides three Windows defaults that would otherwise
+quietly stop collection on a laptop: tasks not starting on battery, tasks being
+stopped when unplugged, and a 72-hour execution limit. Remove it with
+`-Uninstall`.
+
+How missed days are handled: if the laptop is closed at 06:00, that day's
+scrape still runs whenever the machine is on later that day (a 20-hour misfire
+grace, coalesced to one run). Only a day spent entirely offline is skipped —
+the index can't observe a day it wasn't running for. A lock file prevents two
+schedulers from running at once, so starting one by hand while the task is up
+is a harmless no-op.
+
+Docker alternative (only while Docker Desktop is running — pick **one** of the
+two, never both, or every site gets scraped twice):
+
+```bash
+docker compose --profile scheduler up -d scheduler
+```
+
+Structured JSON logs go to `data/logs/scheduler.jsonl` (rotated at 5 MB × 5).
+`GET /health` reports scrape age and per-source status, and marks a source
+`stale` if it hasn't succeeded in 48 hours.
+
+### Tests
+
+```bash
+.venv/Scripts/python -m pytest -q              # full suite
+.venv/Scripts/python -m pytest -q -m "not slow"   # skip the model-training test
+```
+
+Every test runs against a temporary SQLite file — the live and demo databases
+are never touched — and a guard fails any test that opens a network
+connection. MoSPI tests replay recorded responses from `tests/fixtures/mospi/`;
+Brevo is mocked.
 
 ### Alerts (Brevo)
 
@@ -234,6 +295,7 @@ Swagger UI at **`/docs`** (this is the NSO/RBI-facing interface).
 | GET | `/predict?route=&travel_date=&carrier=` | model fare estimate |
 | GET | `/model/info` | training metadata + hold-out metrics |
 | GET | `/festivals/surge` · `/festivals/calendar` | festival vs normal per route; the calendar |
+| GET | `/meta/cities` | city name, airport code and state for every code shown |
 | GET | `/official/cpi` | official MoSPI CPI series (item or sub-group, by sector) |
 | GET | `/official/compare` | official CPI vs APIx: scale link, overlap stats, seasonal profile |
 | GET | `/backtest/dgca` | superseded by `/official/compare`; removed once the UI moves over |

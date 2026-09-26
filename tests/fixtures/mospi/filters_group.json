@@ -1,0 +1,451 @@
+{
+ "data": {
+  "series": [
+   {
+    "series": "Current"
+   },
+   {
+    "series": "Back"
+   }
+  ],
+  "year": [
+   {
+    "year": 2025
+   },
+   {
+    "year": 2024
+   },
+   {
+    "year": 2023
+   },
+   {
+    "year": 2022
+   },
+   {
+    "year": 2021
+   },
+   {
+    "year": 2020
+   },
+   {
+    "year": 2019
+   },
+   {
+    "year": 2018
+   },
+   {
+    "year": 2017
+   },
+   {
+    "year": 2016
+   },
+   {
+    "year": 2015
+   },
+   {
+    "year": 2014
+   },
+   {
+    "year": 2013
+   },
+   {
+    "year": 2012
+   },
+   {
+    "year": 2011
+   }
+  ],
+  "month": [
+   {
+    "month_code": 1,
+    "month_name": "January"
+   },
+   {
+    "month_code": 2,
+    "month_name": "February"
+   },
+   {
+    "month_code": 3,
+    "month_name": "March"
+   },
+   {
+    "month_code": 4,
+    "month_name": "April"
+   },
+   {
+    "month_code": 5,
+    "month_name": "May"
+   },
+   {
+    "month_code": 6,
+    "month_name": "June"
+   },
+   {
+    "month_code": 7,
+    "month_name": "July"
+   },
+   {
+    "month_code": 8,
+    "month_name": "August"
+   },
+   {
+    "month_code": 9,
+    "month_name": "September"
+   },
+   {
+    "month_code": 10,
+    "month_name": "October"
+   },
+   {
+    "month_code": 11,
+    "month_name": "November"
+   },
+   {
+    "month_code": 12,
+    "month_name": "December"
+   }
+  ],
+  "state": [
+   {
+    "state_code": 99,
+    "state_name": "All India"
+   },
+   {
+    "state_code": 35,
+    "state_name": "Andaman & Nicobar Islands"
+   },
+   {
+    "state_code": 28,
+    "state_name": "Andhra Pradesh"
+   },
+   {
+    "state_code": 12,
+    "state_name": "Arunachal Pradesh"
+   },
+   {
+    "state_code": 18,
+    "state_name": "Assam"
+   },
+   {
+    "state_code": 10,
+    "state_name": "Bihar"
+   },
+   {
+    "state_code": 4,
+    "state_name": "Chandigarh"
+   },
+   {
+    "state_code": 22,
+    "state_name": "Chhattisgarh"
+   },
+   {
+    "state_code": 26,
+    "state_name": "Dadra & Nagar Haveli"
+   },
+   {
+    "state_code": 25,
+    "state_name": "Daman & Diu"
+   },
+   {
+    "state_code": 7,
+    "state_name": "Delhi"
+   },
+   {
+    "state_code": 30,
+    "state_name": "Goa"
+   },
+   {
+    "state_code": 24,
+    "state_name": "Gujarat"
+   },
+   {
+    "state_code": 6,
+    "state_name": "Haryana"
+   },
+   {
+    "state_code": 2,
+    "state_name": "Himachal Pradesh"
+   },
+   {
+    "state_code": 1,
+    "state_name": "Jammu & Kashmir"
+   },
+   {
+    "state_code": 20,
+    "state_name": "Jharkhand"
+   },
+   {
+    "state_code": 29,
+    "state_name": "Karnataka"
+   },
+   {
+    "state_code": 32,
+    "state_name": "Kerala"
+   },
+   {
+    "state_code": 31,
+    "state_name": "Lakshadweep"
+   },
+   {
+    "state_code": 23,
+    "state_name": "Madhya Pradesh"
+   },
+   {
+    "state_code": 27,
+    "state_name": "Maharashtra"
+   },
+   {
+    "state_code": 14,
+    "state_name": "Manipur"
+   },
+   {
+    "state_code": 17,
+    "state_name": "Meghalaya"
+   },
+   {
+    "state_code": 15,
+    "state_name": "Mizoram"
+   },
+   {
+    "state_code": 13,
+    "state_name": "Nagaland"
+   },
+   {
+    "state_code": 21,
+    "state_name": "Odisha"
+   },
+   {
+    "state_code": 34,
+    "state_name": "Puducherry"
+   },
+   {
+    "state_code": 3,
+    "state_name": "Punjab"
+   },
+   {
+    "state_code": 8,
+    "state_name": "Rajasthan"
+   },
+   {
+    "state_code": 11,
+    "state_name": "Sikkim"
+   },
+   {
+    "state_code": 33,
+    "state_name": "Tamil Nadu"
+   },
+   {
+    "state_code": 36,
+    "state_name": "Telangana"
+   },
+   {
+    "state_code": 16,
+    "state_name": "Tripura"
+   },
+   {
+    "state_code": 5,
+    "state_name": "Uttarakhand"
+   },
+   {
+    "state_code": 9,
+    "state_name": "Uttar Pradesh"
+   },
+   {
+    "state_code": 19,
+    "state_name": "West Bengal"
+   }
+  ],
+  "sector": [
+   {
+    "sector_code": 1,
+    "sector_name": "Rural"
+   },
+   {
+    "sector_code": 2,
+    "sector_name": "Urban"
+   },
+   {
+    "sector_code": 3,
+    "sector_name": "Combined"
+   }
+  ],
+  "group": [
+   {
+    "group_code": "0",
+    "group_name": "General"
+   },
+   {
+    "group_code": "1",
+    "group_name": "Food and Beverages"
+   },
+   {
+    "group_code": "2",
+    "group_name": "Pan, Tobacco and Intoxicants"
+   },
+   {
+    "group_code": "3",
+    "group_name": "Clothing and Footwear"
+   },
+   {
+    "group_code": "4",
+    "group_name": "Housing"
+   },
+   {
+    "group_code": "5",
+    "group_name": "Fuel and Light"
+   },
+   {
+    "group_code": "6",
+    "group_name": "Miscellaneous"
+   },
+   {
+    "group_code": "7",
+    "group_name": "Consumer Food Price"
+   }
+  ],
+  "subgroup": [
+   {
+    "subgroup_code": "0.99",
+    "group_code": "0",
+    "subgroup_name": "General-Overall"
+   },
+   {
+    "subgroup_code": "1.1.01",
+    "group_code": "1",
+    "subgroup_name": "Cereals and Products"
+   },
+   {
+    "subgroup_code": "1.1.02",
+    "group_code": "1",
+    "subgroup_name": "Meat and Fish"
+   },
+   {
+    "subgroup_code": "1.1.03",
+    "group_code": "1",
+    "subgroup_name": "Egg"
+   },
+   {
+    "subgroup_code": "1.1.04",
+    "group_code": "1",
+    "subgroup_name": "Milk and Products"
+   },
+   {
+    "subgroup_code": "1.1.05",
+    "group_code": "1",
+    "subgroup_name": "Oils and Fats"
+   },
+   {
+    "subgroup_code": "1.1.06",
+    "group_code": "1",
+    "subgroup_name": "Fruits"
+   },
+   {
+    "subgroup_code": "1.1.07",
+    "group_code": "1",
+    "subgroup_name": "Vegetables"
+   },
+   {
+    "subgroup_code": "1.1.08",
+    "group_code": "1",
+    "subgroup_name": "Pulses and Products"
+   },
+   {
+    "subgroup_code": "1.1.09",
+    "group_code": "1",
+    "subgroup_name": "Sugar and Confectionery"
+   },
+   {
+    "subgroup_code": "1.1.10",
+    "group_code": "1",
+    "subgroup_name": "Spices"
+   },
+   {
+    "subgroup_code": "1.1.12",
+    "group_code": "1",
+    "subgroup_name": "Prepared Meals, Snacks, Sweets etc."
+   },
+   {
+    "subgroup_code": "1.2.11",
+    "group_code": "1",
+    "subgroup_name": "Non-alcoholic Beverages"
+   },
+   {
+    "subgroup_code": "1.99",
+    "group_code": "1",
+    "subgroup_name": "Food and Beverages-Overall"
+   },
+   {
+    "subgroup_code": "2.99",
+    "group_code": "2",
+    "subgroup_name": "Pan, Tobacco and Intoxicants-Overall"
+   },
+   {
+    "subgroup_code": "3.1.01",
+    "group_code": "3",
+    "subgroup_name": "Clothing"
+   },
+   {
+    "subgroup_code": "3.1.02",
+    "group_code": "3",
+    "subgroup_name": "Footwear"
+   },
+   {
+    "subgroup_code": "3.99",
+    "group_code": "3",
+    "subgroup_name": "Clothing and Footwear-Overall"
+   },
+   {
+    "subgroup_code": "4.99",
+    "group_code": "4",
+    "subgroup_name": "Housing-Overall"
+   },
+   {
+    "subgroup_code": "5.99",
+    "group_code": "5",
+    "subgroup_name": "Fuel and Light-Overall"
+   },
+   {
+    "subgroup_code": "6.1.01",
+    "group_code": "6",
+    "subgroup_name": "Household Goods and Services"
+   },
+   {
+    "subgroup_code": "6.1.02",
+    "group_code": "6",
+    "subgroup_name": "Health"
+   },
+   {
+    "subgroup_code": "6.1.03",
+    "group_code": "6",
+    "subgroup_name": "Transport and Communication"
+   },
+   {
+    "subgroup_code": "6.1.04",
+    "group_code": "6",
+    "subgroup_name": "Recreation and Amusement"
+   },
+   {
+    "subgroup_code": "6.1.05",
+    "group_code": "6",
+    "subgroup_name": "Education"
+   },
+   {
+    "subgroup_code": "6.1.06",
+    "group_code": "6",
+    "subgroup_name": "Personal Care and Effects"
+   },
+   {
+    "subgroup_code": "6.99",
+    "group_code": "6",
+    "subgroup_name": "Miscellaneous-Overall"
+   },
+   {
+    "subgroup_code": "7.99",
+    "group_code": "7",
+    "subgroup_name": "Consumer Food Price-Overall"
+   }
+  ]
+ },
+ "msg": "Data fetched successfully",
+ "statusCode": true
+}

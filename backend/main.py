@@ -14,6 +14,9 @@ endpoint says so — `{"available": false, "reason": ...}` with a 200, because
 "not enough history" is a normal state of a young index, not a server error.
 Serving invented numbers that look real is the one thing this API must not do.
 
+Errors that ARE errors (bad input, unknown route, untrained model) share one
+envelope: `{"error": <code>, "detail": <human message>, "path": <url>}`.
+
 DEMO_MODE (see pipeline.db) points the whole app at a separate seeded database
 for presentations; /meta reports which mode is live so the UI can badge it.
 """
@@ -23,43 +26,114 @@ import json
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from contextlib import asynccontextmanager
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, EmailStr, Field
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from pipeline import backtest, fare_model, festivals, official_compare
+from backend import schemas as S
+from pipeline import timeutil
+from pipeline import backtest, fare_model, festivals, notifier, official_compare
 from pipeline import index as index_engine
-from pipeline.db import DATA_MODE, DB_PATH, DEMO_MODE, assert_mode_consistent, connect, init_db
-from pipeline.trend_forecast import linear_forecast
+from pipeline.cities import WINDOW_LABELS, WINDOW_SHORT, as_list as cities_list, route_label
+import pipeline.db as dbmod
+from pipeline.db import DATA_MODE, DEMO_MODE, assert_mode_consistent, connect, init_db
+from pipeline.trend_forecast import LOOKBACK_DAYS, linear_forecast
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
+log = logging.getLogger("backend")
+
+MIN_FORECAST_DAYS = LOOKBACK_DAYS
+# A source that has not succeeded in two days is stale: scrapes run daily, so
+# one missed run is noise but two is a pattern worth surfacing.
+STALE_AFTER_HOURS = 48
+
+ROUTES = list(index_engine.ROUTE_WEIGHTS)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Fail before serving a single request if the mode and database disagree.
+    assert_mode_consistent()
+    init_db(connect()).close()
+    logging.getLogger("uvicorn.error").warning(
+        "AIRINDEX starting in %s mode -> %s", DATA_MODE.upper(), dbmod.DB_PATH.name
+    )
+    yield
+
 
 app = FastAPI(
     title="AIRINDEX INDIA — Airfare Price Index API",
-    version="0.2.0",
+    version="0.3.0",
     description=(
         "Daily Airfare Price Index (APIx) for Indian domestic routes, built from "
-        "web-scraped airline/OTA fares (robots.txt-respecting, rate-limited, served from cached snapshots). "
-        "Intended for NSO / RBI / research consumers.\n\n"
-        "Base day = 100. Weights = DGCA traffic share. See `/meta` for the data mode and provenance."
+        "web-scraped airline/OTA fares (robots.txt-respecting, rate-limited, served from cached snapshots), "
+        "alongside the official MoSPI CPI airfare index.\n\n"
+        "Base day = 100. Weights = DGCA traffic share. See `/meta` for the data mode and provenance. "
+        "Endpoints that can be empty return `available: false` with a `reason` instead of invented data."
     ),
+    lifespan=lifespan,
+    responses={
+        400: {"model": S.ErrorResponse}, 404: {"model": S.ErrorResponse},
+        422: {"model": S.ErrorResponse}, 500: {"model": S.ErrorResponse},
+    },
 )
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(","),
+    allow_origins=[o.strip() for o in os.environ.get(
+        "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173").split(",") if o.strip()],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 # --------------------------------------------------------------------------- #
-# DB
+# Error envelope
+# --------------------------------------------------------------------------- #
+_CODES = {400: "bad_request", 404: "not_found", 409: "conflict", 422: "invalid_input",
+          503: "unavailable", 500: "internal_error"}
+
+
+def _envelope(status: int, detail: str, request: Request, **extra) -> JSONResponse:
+    return JSONResponse(
+        status_code=status,
+        content={"error": _CODES.get(status, "error"), "detail": detail, "path": request.url.path, **extra},
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    return _envelope(exc.status_code, str(exc.detail), request)
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: RequestValidationError):
+    # One readable sentence for people, the structured list for code.
+    fields = [
+        {"field": ".".join(str(p) for p in e["loc"] if p not in ("body", "query", "path")), "message": e["msg"]}
+        for e in exc.errors()
+    ]
+    summary = "; ".join(f"{f['field']}: {f['message']}" for f in fields) or "Invalid request"
+    return _envelope(422, summary, request, errors=fields)
+
+
+@app.exception_handler(Exception)
+async def _unhandled(request: Request, exc: Exception):
+    # Log the real cause; never leak a traceback to the client.
+    log.exception("unhandled error on %s", request.url.path)
+    return _envelope(500, "Something went wrong on our side. Please try again.", request)
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
 # --------------------------------------------------------------------------- #
 def get_db():
     conn = connect()
@@ -67,18 +141,6 @@ def get_db():
         yield conn
     finally:
         conn.close()
-
-
-@app.on_event("startup")
-def _startup():
-    assert_mode_consistent()
-    init_db(connect()).close()
-    logging.getLogger("uvicorn.error").warning(
-        "AIRINDEX starting in %s mode -> %s", DATA_MODE.upper(), DB_PATH.name
-    )
-
-
-MIN_FORECAST_DAYS = 10   # matches trend_forecast.LOOKBACK_DAYS
 
 
 def _has_snapshot_data(conn: sqlite3.Connection) -> bool:
@@ -91,10 +153,14 @@ def _unavailable(reason: str, message: str, **shape) -> dict:
 
     Empty is a normal state for a young index, not a failure, so it should not
     look like one to the client. `shape` carries the same keys the populated
-    response would have (empty lists, nulls) so callers can render without
-    branching on every field.
+    response would have (empty lists, nulls) so callers render without
+    branching on every field. Messages are written for a traveller, not an
+    engineer — the UI shows them verbatim.
     """
     return {"available": False, "reason": reason, "message": message, **shape}
+
+
+NO_DATA_MSG = "We haven't collected any fares yet. The first prices appear after the next daily check."
 
 
 def _provenance(conn: sqlite3.Connection) -> dict:
@@ -109,40 +175,102 @@ def _provenance(conn: sqlite3.Connection) -> dict:
             {"source": s["source"], "last_scraped_at": s["last"], "snapshots": s["n"],
              "records": s["records"], "synthetic": bool(s["is_synthetic"])} for s in snaps
         ],
-        "db_path": str(DB_PATH.relative_to(ROOT)),
+        "db_path": _db_display(),
     }
-
-
-# --------------------------------------------------------------------------- #
-# Schemas
-# --------------------------------------------------------------------------- #
-class SaveRouteRequest(BaseModel):
-    browser_id: str = Field(..., min_length=6, max_length=64)
-    origin: str = Field(..., min_length=3, max_length=3, examples=["DEL"])
-    destination: str = Field(..., min_length=3, max_length=3, examples=["BOM"])
-    preferred_days: list[str] = Field(default_factory=list, examples=[["Fri", "Sat"]])
-    email: EmailStr
-
-
-ROUTES = list(index_engine.ROUTE_WEIGHTS)
 
 
 def _validate_route(route: str) -> str:
     route = route.upper()
     if route not in index_engine.ROUTE_WEIGHTS:
-        raise HTTPException(404, f"Unknown route '{route}'. Known: {ROUTES}")
+        known = ", ".join(route_label(r) for r in ROUTES)
+        raise HTTPException(404, f"We don't track {route}. Routes covered: {known}.")
     return route
 
 
+def _db_display() -> str:
+    """Path of the database actually in use, repo-relative when possible.
+
+    Read at call time from pipeline.db, and never assume the DB lives inside
+    the repo — a deployment may keep it on another disk.
+    """
+    path = dbmod.DB_PATH
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
+def _iso(d: date | None) -> str | None:
+    return d.isoformat() if d else None
+
+
+def _hours_since(ts: str | None) -> float | None:
+    if not ts:
+        return None
+    try:
+        return round((timeutil.now() - datetime.fromisoformat(ts)).total_seconds() / 3600, 1)
+    except ValueError:
+        return None
+
+
 # --------------------------------------------------------------------------- #
-# Meta
+# Meta / health
 # --------------------------------------------------------------------------- #
-@app.get("/health", tags=["meta"])
+@app.get("/health", tags=["meta"], response_model=S.Health)
 def health():
-    return {"status": "ok", "time": datetime.now().isoformat(timespec="seconds")}
+    """
+    Liveness plus data freshness. 200 when serving (even if degraded), 503 only
+    when the database itself is unreachable — so an uptime checker pages on a
+    real outage, while a stale source shows up as `degraded` with a warning.
+    """
+    now = timeutil.now()
+    out = {"status": "ok", "time": now.isoformat(timespec="seconds"), "data_mode": DATA_MODE,
+           "database": {"reachable": False, "path": _db_display()},
+           "sources": [], "warnings": []}
+    try:
+        conn = connect()
+        conn.execute("SELECT 1").fetchone()
+    except sqlite3.Error as exc:
+        out["status"] = "error"
+        out["database"]["error"] = str(exc)
+        return JSONResponse(status_code=503, content=out)
+
+    try:
+        out["database"]["reachable"] = True
+        last_scrape = conn.execute(
+            "SELECT MAX(scraped_at) FROM snapshots WHERE is_synthetic = 0").fetchone()[0]
+        out["latest_scrape_date"] = conn.execute("SELECT MAX(scrape_date) FROM fares").fetchone()[0]
+        out["scrape_age_hours"] = _hours_since(last_scrape)
+        out["index_days"] = conn.execute("SELECT COUNT(*) FROM index_daily").fetchone()[0]
+        out["official_cpi_months"] = conn.execute(
+            "SELECT COUNT(*) FROM official_cpi WHERE level = 'Item'").fetchone()[0]
+
+        for r in conn.execute("SELECT * FROM source_health ORDER BY source"):
+            age = _hours_since(r["last_ok_at"])
+            stale = age is None or age > STALE_AFTER_HOURS
+            out["sources"].append({**dict(r), "stale": stale})
+            if r["status"] != "ok":
+                out["warnings"].append(f"source {r['source']} is {r['status']}: {r['last_error'] or 'no detail'}")
+            if stale:
+                out["warnings"].append(f"source {r['source']} has not succeeded in {STALE_AFTER_HOURS}h")
+    finally:
+        conn.close()
+
+    if out["scrape_age_hours"] is None:
+        out["warnings"].append("no real scrape recorded yet")
+    elif out["scrape_age_hours"] > STALE_AFTER_HOURS:
+        out["warnings"].append(f"latest real scrape is {out['scrape_age_hours']}h old")
+    if not out["sources"]:
+        out["warnings"].append("no source_health rows — the scheduler has not run yet")
+    if out["official_cpi_months"] == 0:
+        out["warnings"].append("official CPI not fetched — run python -m pipeline.mospi")
+
+    if out["warnings"]:
+        out["status"] = "degraded"
+    return out
 
 
-@app.get("/meta", tags=["meta"])
+@app.get("/meta", tags=["meta"], response_model=S.Meta)
 def meta(conn: sqlite3.Connection = Depends(get_db)):
     """Routes, windows, carriers, and the provenance of the data backing the API."""
     has_data = _has_snapshot_data(conn)
@@ -156,8 +284,14 @@ def meta(conn: sqlite3.Connection = Depends(get_db)):
         "demo_mode": DEMO_MODE,
         "has_data": has_data,
         "routes": ROUTES,
+        "route_details": [
+            {"route": r, "origin": r.split("-")[0], "destination": r.split("-")[1],
+             "label": route_label(r), "weight": w}
+            for r, w in index_engine.ROUTE_WEIGHTS.items()
+        ],
         "weights": index_engine.ROUTE_WEIGHTS,
         "windows": index_engine.WINDOWS,
+        "window_labels": WINDOW_LABELS,
         "carriers": carriers,
         "n_real_days": daily["n_real_days"] if daily else 0,
         "n_synthetic_days": daily["n_synthetic_days"] if daily else 0,
@@ -165,53 +299,76 @@ def meta(conn: sqlite3.Connection = Depends(get_db)):
     }
 
 
+@app.get("/meta/cities", tags=["meta"], response_model=list[S.City])
+def meta_cities():
+    """City name, airport code and state for every code the app can show."""
+    return cities_list()
+
+
 # --------------------------------------------------------------------------- #
 # Index
 # --------------------------------------------------------------------------- #
-@app.get("/index/daily", tags=["index"])
+@app.get("/index/daily", tags=["index"], response_model=S.IndexDaily)
 def index_daily(conn: sqlite3.Connection = Depends(get_db)):
     """Daily APIx value. First captured day = 100. `is_synthetic` marks seeded demo history."""
     if not _has_snapshot_data(conn):
-        return _unavailable("no_index_data", "No scrape days have been processed yet.",
-                            index_name=index_engine.INDEX_NAME, points=[], latest=None)
+        return _unavailable("no_index_data", NO_DATA_MSG, points=[], latest=None)
     return {"available": True, **index_engine.get_index_daily(conn)}
 
 
-@app.get("/index/forecast", tags=["index"])
+@app.get("/index/forecast", tags=["index"], response_model=S.IndexForecast)
 def index_forecast(days: int = Query(5, ge=3, le=7), conn: sqlite3.Connection = Depends(get_db)):
     """Linear-trend extrapolation of the last 10 index values with a 95% residual band."""
     points = index_engine.get_index_daily(conn)["points"] if _has_snapshot_data(conn) else []
     if len(points) < MIN_FORECAST_DAYS:
         # A trend line through one or two points is not a forecast, it is a
         # guess with error bars drawn on. Say what is missing instead.
+        remaining = MIN_FORECAST_DAYS - len(points)
         return _unavailable(
             "insufficient_history",
-            f"A forecast needs at least {MIN_FORECAST_DAYS} index days; the scraper has produced {len(points)}.",
+            f"We need {remaining} more day{'s' if remaining != 1 else ''} of prices before we can "
+            f"predict where fares are heading. We have {len(points)} so far — check back tomorrow.",
             have=len(points), need=MIN_FORECAST_DAYS, points=[],
         )
     return {"available": True, **linear_forecast(points, horizon=days)}
 
 
-@app.get("/index/heatmap", tags=["index"])
-def index_heatmap(date: str | None = Query(None, description="YYYY-MM-DD scrape day; default latest"),
+@app.get("/index/heatmap", tags=["index"], response_model=S.Heatmap)
+def index_heatmap(date_: date | None = Query(None, alias="date", description="Scrape day; default latest"),
                   conn: sqlite3.Connection = Depends(get_db)):
     """Average nonstop economy fare per route x advance-purchase window."""
     if not _has_snapshot_data(conn):
-        return _unavailable("no_index_data", "No scrape days have been processed yet.",
-                            routes=ROUTES, windows=index_engine.WINDOWS, cells=[])
-    return {"available": True, **index_engine.get_heatmap(conn, date)}
+        return _unavailable("no_index_data", NO_DATA_MSG, routes=ROUTES, windows=index_engine.WINDOWS, cells=[])
+    return {"available": True, **index_engine.get_heatmap(conn, _iso(date_))}
 
 
 # --------------------------------------------------------------------------- #
 # Routes / fares
 # --------------------------------------------------------------------------- #
-@app.get("/routes/{route}/trend", tags=["routes"])
+def _best_window(windows: list[dict]) -> dict | None:
+    """The cheapest advance-purchase window, and how much it saves vs the dearest."""
+    priced = [w for w in windows if w.get("actual_avg")]
+    if len(priced) < 2:
+        return None
+    best = min(priced, key=lambda w: w["actual_avg"])
+    worst = max(priced, key=lambda w: w["actual_avg"])
+    return {
+        "window": best["window"],
+        "label": WINDOW_SHORT.get(best["window"], best["window"]),
+        "avg_fare": round(best["actual_avg"]),
+        "vs_window": worst["window"],
+        "vs_label": WINDOW_SHORT.get(worst["window"], worst["window"]),
+        "saving_pct": round((1 - best["actual_avg"] / worst["actual_avg"]) * 100, 1),
+    }
+
+
+@app.get("/routes/{route}/trend", tags=["routes"], response_model=S.RouteTrend)
 def route_trend(route: str, conn: sqlite3.Connection = Depends(get_db)):
     """Fare by advance-purchase window for one route, with predicted-vs-actual overlay."""
     route = _validate_route(route)
     if not _has_snapshot_data(conn):
-        return _unavailable("no_index_data", "No scrape days have been processed yet.",
-                            route=route, windows=[], carriers=[])
+        return _unavailable("no_index_data", NO_DATA_MSG, route=route, label=route_label(route),
+                            windows=[], carriers=[])
     trend = index_engine.get_route_trend(conn, route)
     if trend["date"]:
         overlay = fare_model.overlay_for_route(conn, route, trend["date"])
@@ -219,31 +376,28 @@ def route_trend(route: str, conn: sqlite3.Connection = Depends(get_db)):
             w["predicted_avg"] = overlay.get(w["window"])
         m = fare_model.load()
         trend["model"] = {k: v for k, v in m["meta"].items() if k != "features"} if m else None
-    return {"available": True, **trend}
+    for w in trend["windows"]:
+        w["label"] = WINDOW_SHORT.get(w["window"], w["window"])
+    return {"available": True, **trend, "label": route_label(route), "best_window": _best_window(trend["windows"])}
 
 
-class PredictResponse(BaseModel):
-    route: str
-    carrier: str
-    travel_date: str
-    as_of: str
-    predicted_fare: int
-    features: dict
-    model: dict
-
-
-@app.get("/predict", tags=["routes"], response_model=PredictResponse)
+@app.get("/predict", tags=["routes"], response_model=S.Prediction)
 def predict(
     route: str = Query(..., examples=["DEL-BOM"]),
-    travel_date: str = Query(..., description="YYYY-MM-DD"),
-    carrier: str = Query("6E", description="IATA code, e.g. 6E, AI, IX, QP, SG"),
-    as_of: str | None = Query(None, description="booking date, default today"),
+    travel_date: date = Query(..., description="YYYY-MM-DD"),
+    carrier: str = Query("6E", min_length=2, max_length=3, description="IATA code, e.g. 6E, AI, IX, QP, SG"),
+    as_of: date | None = Query(None, description="booking date, default today"),
 ):
     """Model-predicted nonstop economy fare for a route on a future date."""
     route = _validate_route(route)
-    out = fare_model.predict_one(route, carrier.upper(), travel_date, as_of)
+    booked = as_of or timeutil.today()
+    if travel_date < booked:
+        raise HTTPException(400, "The travel date is in the past — pick a date from today onwards.")
+    if travel_date > booked + timedelta(days=180):
+        raise HTTPException(400, "We can only estimate fares up to 6 months ahead.")
+    out = fare_model.predict_one(route, carrier.upper(), travel_date.isoformat(), booked.isoformat())
     if out is None:
-        raise HTTPException(503, "Fare model not trained yet — run `python -m pipeline.run_all`.")
+        raise HTTPException(503, "The fare model hasn't been trained yet — it needs a scrape to learn from.")
     return out
 
 
@@ -252,16 +406,16 @@ def model_info():
     """Training metadata + hold-out metrics of the current fare model."""
     m = fare_model.load()
     if not m:
-        raise HTTPException(503, "Fare model not trained yet.")
+        raise HTTPException(503, "The fare model hasn't been trained yet.")
     return m["meta"]
 
 
-@app.get("/fares/raw", tags=["routes"])
+@app.get("/fares/raw", tags=["routes"], response_model=S.FaresRaw)
 def fares_raw(
     route: str | None = Query(None, examples=["DEL-BOM"]),
-    date_from: str | None = Query(None, description="YYYY-MM-DD (travel_date >=)"),
-    date_to: str | None = Query(None, description="YYYY-MM-DD (travel_date <=)"),
-    scrape_date: str | None = Query(None, description="YYYY-MM-DD; default latest scrape day"),
+    date_from: date | None = Query(None, description="travel_date >="),
+    date_to: date | None = Query(None, description="travel_date <="),
+    scrape_date: date | None = Query(None, description="default latest scrape day"),
     nonstop_only: bool = Query(False),
     include_synthetic: bool = Query(False),
     limit: int = Query(200, ge=1, le=5000),
@@ -269,23 +423,27 @@ def fares_raw(
     conn: sqlite3.Connection = Depends(get_db),
 ):
     """Cleaned fare records (the `fares` table), filterable by route, travel date and scrape day."""
+    if date_from and date_to and date_from > date_to:
+        raise HTTPException(400, "The start date is after the end date.")
     if not _has_snapshot_data(conn):
-        return _unavailable("no_index_data", "No scrape days have been processed yet.",
-                            count=0, total=0, records=[])
+        return _unavailable("no_index_data", NO_DATA_MSG, count=0, total=0, records=[],
+                            offset=offset, limit=limit)
 
     where, params = ["1=1"], []
     if route:
         where.append("route = ?"); params.append(_validate_route(route))
     if date_from:
-        where.append("travel_date >= ?"); params.append(date_from)
+        where.append("travel_date >= ?"); params.append(date_from.isoformat())
     if date_to:
-        where.append("travel_date <= ?"); params.append(date_to)
+        where.append("travel_date <= ?"); params.append(date_to.isoformat())
     if scrape_date:
-        where.append("scrape_date = ?"); params.append(scrape_date)
+        where.append("scrape_date = ?"); params.append(scrape_date.isoformat())
     else:
         where.append("scrape_date = (SELECT MAX(scrape_date) FROM fares)")
     if nonstop_only:
         where.append("stops = 0")
+    # Live data never contains synthetic rows, but belt and braces; in demo
+    # mode every row is seeded, so filtering would return nothing.
     if not include_synthetic and not DEMO_MODE:
         where.append("is_synthetic = 0")
     sql = " AND ".join(where)
@@ -294,21 +452,28 @@ def fares_raw(
         f"SELECT * FROM fares WHERE {sql} ORDER BY route, travel_date, total_fare LIMIT ? OFFSET ?",
         [*params, limit, offset],
     ).fetchall()
-    recs = [{k: r[k] for k in r.keys() if k not in ("id",)} for r in rows]
-    for r in recs:
+    records = [{k: r[k] for k in r.keys() if k != "id"} for r in rows]
+    for r in records:
         r["is_outlier"] = bool(r["is_outlier"]); r["is_synthetic"] = bool(r["is_synthetic"])
-    return {"count": len(recs), "total": total, "records": recs}
+    end = offset + len(records)
+    return {
+        "available": True,
+        "count": len(records), "total": total, "records": records,
+        "offset": offset, "limit": limit,
+        "has_more": end < total,
+        "next_offset": end if end < total else None,
+    }
 
 
 # --------------------------------------------------------------------------- #
 # Official statistics (MoSPI)
 # --------------------------------------------------------------------------- #
-@app.get("/official/cpi", tags=["official"])
+@app.get("/official/cpi", tags=["official"], response_model=S.OfficialCpi)
 def official_cpi(
     level: str = Query("Item", pattern="^(Item|SubGroup)$"),
     sector: str = Query("All", pattern="^(All|Rural|Urban|Combined)$"),
-    date_from: str | None = Query(None, description="YYYY-MM (period >=)"),
-    date_to: str | None = Query(None, description="YYYY-MM (period <=)"),
+    date_from: str | None = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="YYYY-MM (period >=)"),
+    date_to: str | None = Query(None, pattern=r"^\d{4}-(0[1-9]|1[0-2])$", description="YYYY-MM (period <=)"),
     conn: sqlite3.Connection = Depends(get_db),
 ):
     """Official CPI series as fetched from MoSPI eSankhyiki."""
@@ -323,7 +488,7 @@ def official_cpi(
     ).fetchall()
     if not rows:
         return _unavailable("no_official_data",
-                            "Official CPI has not been fetched yet — run `python -m pipeline.mospi`.",
+                            "The government's official airfare figures haven't been downloaded yet.",
                             level=level, sector=sector, points=[])
     return {
         "available": True,
@@ -348,44 +513,57 @@ def official_comparison(conn: sqlite3.Connection = Depends(get_db)):
 # --------------------------------------------------------------------------- #
 # Back-test (superseded by /official/compare; removed once the UI moves over)
 # --------------------------------------------------------------------------- #
-@app.get("/backtest/dgca", tags=["index"])
+@app.get("/backtest/dgca", tags=["index"], deprecated=True)
 def backtest_dgca(include_synthetic: bool = Query(False), conn: sqlite3.Connection = Depends(get_db)):
-    """Our monthly basket fare levels vs the public reference table (see data/reference/). `reference.status` says whether the table is OFFICIAL or ILLUSTRATIVE."""
+    """Deprecated: illustrative reference table. Use /official/compare."""
     if not _has_snapshot_data(conn):
-        raise HTTPException(503, "No snapshot data yet.")
+        return _unavailable("no_index_data", NO_DATA_MSG, comparison=[], series=[])
     return backtest.compute(conn, include_synthetic=include_synthetic)
 
 
 # --------------------------------------------------------------------------- #
 # Festivals
 # --------------------------------------------------------------------------- #
-@app.get("/festivals/surge", tags=["festivals"])
+@app.get("/festivals/surge", tags=["festivals"], response_model=S.FestivalSurge)
 def festivals_surge(conn: sqlite3.Connection = Depends(get_db)):
-    """Festival vs normal mean fare per route (same advance-purchase window mix), real records only."""
+    """Festival vs normal mean fare per route (same advance-purchase window mix)."""
     if not _has_snapshot_data(conn):
-        return _unavailable("no_index_data", "No scrape days have been processed yet.",
-                            festivals=festivals.FESTIVALS, surge=[], n_records=0)
-    return {"available": True, **festivals.compute_surge(conn)}
+        return _unavailable("no_index_data", NO_DATA_MSG, festivals=festivals.FESTIVALS, surge=[], n_records=0)
+    out = festivals.compute_surge(conn)
+    for row in out["surge"]:
+        row["label"] = route_label(row["route"])
+    return {"available": True, **out}
 
 
 @app.get("/festivals/calendar", tags=["festivals"])
 def festivals_calendar():
-    """The hard-coded festival travel-window calendar used for tagging."""
+    """The festival travel-window calendar used for tagging."""
     return {"festivals": festivals.FESTIVALS}
 
 
 # --------------------------------------------------------------------------- #
-# Saved routes / alerts  (SQLite-backed + Brevo notifier land in step 9)
+# Saved routes / alerts
 # --------------------------------------------------------------------------- #
-@app.post("/routes/save", tags=["alerts"], status_code=201)
-def save_route(body: SaveRouteRequest, conn: sqlite3.Connection = Depends(get_db)):
+def _saved_row(row) -> dict:
+    d = dict(row)
+    d["preferred_days"] = json.loads(d["preferred_days"] or "[]")
+    d["route"] = f"{d['origin']}-{d['destination']}"
+    d["label"] = route_label(d["route"])
+    return d
+
+
+@app.post("/routes/save", tags=["alerts"], status_code=201, response_model=S.SavedRoute)
+def save_route(body: S.SaveRouteRequest, conn: sqlite3.Connection = Depends(get_db)):
     """Save a watched route for a browser_id + email (no login required)."""
     o, d = body.origin.upper(), body.destination.upper()
+    if o == d:
+        raise HTTPException(400, "The departure and arrival cities are the same.")
     _validate_route(f"{o}-{d}")
-    now = datetime.now().isoformat(timespec="seconds")
+    now = timeutil.stamp()
     conn.execute(
-        "INSERT INTO saved_routes (browser_id, origin, destination, preferred_days, email, created_at) VALUES (?,?,?,?,?,?) "
-        "ON CONFLICT(browser_id, origin, destination) DO UPDATE SET preferred_days = excluded.preferred_days, email = excluded.email",
+        "INSERT INTO saved_routes (browser_id, origin, destination, preferred_days, email, created_at) "
+        "VALUES (?,?,?,?,?,?) ON CONFLICT(browser_id, origin, destination) DO UPDATE SET "
+        "preferred_days = excluded.preferred_days, email = excluded.email",
         (body.browser_id, o, d, json.dumps(body.preferred_days), body.email, now),
     )
     conn.commit()
@@ -394,47 +572,44 @@ def save_route(body: SaveRouteRequest, conn: sqlite3.Connection = Depends(get_db
     return _saved_row(row)
 
 
-def _saved_row(row) -> dict:
-    d = dict(row)
-    d["preferred_days"] = json.loads(d["preferred_days"] or "[]")
-    return d
-
-
-@app.get("/routes/saved/{browser_id}", tags=["alerts"])
+@app.get("/routes/saved/{browser_id}", tags=["alerts"], response_model=S.SavedRoutes)
 def list_saved_routes(browser_id: str, conn: sqlite3.Connection = Depends(get_db)):
-    rows = conn.execute("SELECT * FROM saved_routes WHERE browser_id = ? ORDER BY created_at", (browser_id,)).fetchall()
+    rows = conn.execute("SELECT * FROM saved_routes WHERE browser_id = ? ORDER BY created_at",
+                        (browser_id,)).fetchall()
     return {"browser_id": browser_id, "routes": [_saved_row(r) for r in rows]}
 
 
 @app.delete("/routes/saved/{browser_id}/{route_id}", tags=["alerts"], status_code=204)
 def delete_saved_route(browser_id: str, route_id: int, conn: sqlite3.Connection = Depends(get_db)):
-    conn.execute("DELETE FROM saved_routes WHERE browser_id = ? AND id = ?", (browser_id, route_id))
+    cur = conn.execute("DELETE FROM saved_routes WHERE browser_id = ? AND id = ?", (browser_id, route_id))
     conn.commit()
+    if cur.rowcount == 0:
+        raise HTTPException(404, "That alert doesn't exist (it may already have been removed).")
 
 
-@app.get("/routes/{browser_id}/alerts", tags=["alerts"])
+@app.get("/routes/{browser_id}/alerts", tags=["alerts"], response_model=S.RouteAlerts)
 def route_alerts(browser_id: str, conn: sqlite3.Connection = Depends(get_db)):
-    """Is any saved route cheap today (>15% below its rolling baseline)?"""
+    """
+    Is any saved route cheap today? Uses exactly the same rule as the email job
+    (pipeline.notifier.fare_levels), so the page and the inbox cannot disagree.
+    """
     rows = conn.execute("SELECT * FROM saved_routes WHERE browser_id = ?", (browser_id,)).fetchall()
+    latest = notifier.latest_date(conn)
     out = []
     for r in rows:
         route = f"{r['origin']}-{r['destination']}"
-        today = conn.execute(
-            "SELECT AVG(avg_fare) AS v FROM route_daily WHERE route = ? AND date = (SELECT MAX(date) FROM route_daily)", (route,)
-        ).fetchone()["v"]
-        base = conn.execute(
-            "SELECT AVG(avg_fare) AS v FROM route_daily WHERE route = ? AND date < (SELECT MAX(date) FROM route_daily) "
-            "AND date >= date((SELECT MAX(date) FROM route_daily), '-14 days')", (route,)
-        ).fetchone()["v"]
-        pct = round((base - today) / base * 100, 1) if today and base else None
+        lv = notifier.fare_levels(conn, route, latest)
         out.append({
-            "route": route, "today_fare": round(today) if today else None, "baseline_fare": round(base) if base else None,
-            "pct_below_baseline": pct, "is_cheap": bool(pct is not None and pct > 15),
+            "route": route, "label": route_label(route),
+            "today_fare": lv["today"], "baseline_fare": lv["baseline"],
+            "pct_below_baseline": lv["pct_below"], "is_cheap": lv["is_cheap"],
             "last_notified_at": r["last_notified_at"],
         })
     return {
         "browser_id": browser_id,
-        "checked_at": datetime.now().isoformat(timespec="seconds"),
+        "checked_at": timeutil.stamp(),
         "any_cheap": any(a["is_cheap"] for a in out),
+        "threshold_pct": notifier.THRESHOLD * 100,
+        "baseline_days": notifier.BASELINE_DAYS,
         "alerts": out,
     }

@@ -24,6 +24,7 @@ import logging
 import statistics
 from datetime import date
 
+from pipeline import timeutil
 from pipeline.db import session
 from pipeline.index import get_index_daily
 
@@ -171,7 +172,7 @@ def compute(conn) -> dict:
         "seasonal": {
             "note": "Mean month-over-month change in the official airfare index, 2014 onward.",
             "months": seasonal_profile(cpi),
-            "current_month": MONTH_NAMES[date.today().month - 1],
+            "current_month": MONTH_NAMES[timeutil.today().month - 1],
         },
     }
 

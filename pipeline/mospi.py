@@ -33,6 +33,7 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.ssl_ import create_urllib3_context
 
+from pipeline import timeutil
 from pipeline.db import ROOT, session
 
 log = logging.getLogger("pipeline.mospi")
@@ -224,7 +225,7 @@ def _row(level: str, code: str, name: str, sector: str, raw: dict) -> dict | Non
         "year": year, "month": raw["month"], "month_num": month_num,
         "period": f"{year:04d}-{month_num:02d}",
         "index_value": index_value, "inflation": inflation, "status": raw.get("status"),
-        "fetched_at": datetime.now().isoformat(timespec="seconds"),
+        "fetched_at": timeutil.stamp(),
     }
 
 
@@ -244,7 +245,7 @@ ON CONFLICT(level, base_year, series, item_code, sector, year, month_num) DO UPD
 
 
 def run(years: list[int] | None = None) -> dict:
-    years = years or list(range(FIRST_YEAR, date.today().year + 1))
+    years = years or list(range(FIRST_YEAR, timeutil.today().year + 1))
     codes = discover()
     rows: list[dict] = []
 

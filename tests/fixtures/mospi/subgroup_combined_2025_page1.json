@@ -1,0 +1,132 @@
+{
+ "data": [
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "December",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "172.4",
+   "inflation": "0.82",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "November",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "172.4",
+   "inflation": "0.88",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "October",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "172.3",
+   "inflation": "0.94",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "September",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "173.6",
+   "inflation": "1.82",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "August",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "173.7",
+   "inflation": "1.94",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "July",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "173.5",
+   "inflation": "2.12",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "June",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "173.2",
+   "inflation": "3.90",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "May",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "172.8",
+   "inflation": "3.85",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "April",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "172.4",
+   "inflation": "3.67",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "March",
+   "state": "All India",
+   "sector": "Combined",
+   "group": "Miscellaneous",
+   "subgroup": "Transport and Communication",
+   "index": "172.3",
+   "inflation": "3.36",
+   "status": "F"
+  }
+ ],
+ "meta_data": {
+  "page": 1,
+  "totalRecords": 12,
+  "totalPages": 2,
+  "recordPerPage": 10
+ },
+ "msg": "Data fetched successfully",
+ "statusCode": true
+}

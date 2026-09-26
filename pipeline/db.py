@@ -151,6 +151,21 @@ CREATE TABLE IF NOT EXISTS official_cpi (
 );
 CREATE INDEX IF NOT EXISTS ix_official_cpi_period ON official_cpi(item_code, sector, period);
 
+-- One row per scraper, updated by BaseSource.run. Lets /health answer "is the
+-- data still arriving?" without parsing logs, and makes a source that has been
+-- quietly failing for days visible instead of merely absent.
+CREATE TABLE IF NOT EXISTS source_health (
+    source          TEXT PRIMARY KEY,
+    last_run_at     TEXT,
+    last_ok_at      TEXT,
+    status          TEXT,
+    n_ok            INTEGER NOT NULL DEFAULT 0,
+    n_failed        INTEGER NOT NULL DEFAULT 0,
+    n_records       INTEGER NOT NULL DEFAULT 0,
+    last_error      TEXT,
+    updated_at      TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS saved_routes (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     browser_id          TEXT NOT NULL,
@@ -165,8 +180,10 @@ CREATE TABLE IF NOT EXISTS saved_routes (
 """
 
 
-def connect(path: Path = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(path, check_same_thread=False)
+def connect(path: Path | None = None) -> sqlite3.Connection:
+    # Resolved at call time, not as a default argument, so tests (and anything
+    # else) can redirect pipeline.db.DB_PATH without re-importing every module.
+    conn = sqlite3.connect(path or DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
@@ -195,7 +212,7 @@ def assert_mode_consistent() -> None:
 
 
 @contextmanager
-def session(path: Path = DB_PATH):
+def session(path: Path | None = None):
     conn = connect(path)
     try:
         conn.executescript(SCHEMA)

@@ -31,6 +31,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 
+from pipeline import timeutil
 from pipeline.db import MODEL_FILTER, ROOT, session
 from pipeline.festivals import is_festival
 
@@ -96,7 +97,7 @@ def train(conn) -> dict:
     actual = np.exp(y_te)
     meta = {
         "trained": True,
-        "trained_at": datetime.now().isoformat(timespec="seconds"),
+        "trained_at": timeutil.stamp(),
         "algorithm": "GradientBoostingRegressor(log total_fare)",
         "features": CAT + NUM,
         "n_train": int(len(X_tr)), "n_test": int(len(X_te)),
@@ -134,7 +135,7 @@ def predict_rows(rows: list[dict]) -> list[float] | None:
 
 
 def predict_one(route: str, carrier: str, travel_date: str, scrape_date: str | None = None) -> dict | None:
-    sd = scrape_date or date.today().isoformat()
+    sd = scrape_date or timeutil.today().isoformat()
     feats = featurize(route, carrier, travel_date, sd)
     out = predict_rows([feats])
     if out is None:

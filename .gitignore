@@ -33,3 +33,9 @@ test-results/
 .DS_Store
 *.log
 data/raw_demo/
+
+# Structured scheduler logs (rotated)
+data/logs/
+
+# Scheduler single-instance lock
+data/processed/scheduler.lock

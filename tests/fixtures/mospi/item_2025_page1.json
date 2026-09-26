@@ -1,0 +1,102 @@
+{
+ "data": [
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "December",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "206.3",
+   "inflation": "1.58",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "November",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "215.5",
+   "inflation": "8.56",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "October",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "211.4",
+   "inflation": "8.19",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "September",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "205.1",
+   "inflation": "4.38",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "August",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "203.6",
+   "inflation": "3.35",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "July",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "202.3",
+   "inflation": "3.16",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "June",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "211.6",
+   "inflation": "7.79",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "May",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "214.3",
+   "inflation": "8.29",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "April",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "209.1",
+   "inflation": "5.87",
+   "status": "F"
+  },
+  {
+   "baseyear": "2012",
+   "year": 2025,
+   "month": "March",
+   "item": "Air Fare (normal): Economy Class(adult)",
+   "index": "211.5",
+   "inflation": "7.03",
+   "status": "F"
+  }
+ ],
+ "meta_data": {
+  "page": 1,
+  "totalRecords": 12,
+  "totalPages": 2,
+  "recordPerPage": 10
+ },
+ "msg": "Data fetched successfully",
+ "statusCode": true
+}

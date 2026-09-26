@@ -24,6 +24,7 @@ from pathlib import Path
 from urllib import robotparser
 from urllib.parse import urlparse
 
+from pipeline import timeutil
 from playwright.sync_api import Browser, Page, sync_playwright
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -137,6 +138,8 @@ class BaseSource(ABC):
     min_gap_s: float = 4.0          # polite: >= 4s between page loads
     headless: bool = True
     nav_timeout_ms: int = 45_000
+    max_attempts: int = 3           # per query; blocks are never retried
+    retry_base_s: float = 3.0       # first backoff, doubling each attempt + jitter
 
     def __init__(self):
         self.robots = RobotsGate("*")
@@ -158,13 +161,13 @@ class BaseSource(ABC):
     ) -> Path:
         routes = routes or DEFAULT_ROUTES
         offsets = offsets or DEFAULT_OFFSETS
-        today = date.today()
+        today = timeutil.today()
         queries = [Query(o, d, today + timedelta(days=k)) for (o, d) in routes for k in offsets]
         if max_queries:
             queries = queries[:max_queries]
 
         run_id = uuid.uuid4().hex[:8]
-        started = datetime.now()
+        started = timeutil.now()
         records: list[RawFare] = []
         results: list[QueryResult] = []
         log.info("[%s] run %s: %d queries", self.name, run_id, len(queries))
@@ -186,32 +189,103 @@ class BaseSource(ABC):
                         results.append(QueryResult(q.origin, q.destination, q.travel_date.isoformat(), url,
                                                    "robots_disallowed", 0, 0.0))
                         continue
-                    self.limiter.wait()
-                    try:
-                        fares = self.scrape_query(page, q, url)
-                        status = "ok" if fares else "empty"
-                        records.extend(fares)
-                        results.append(QueryResult(q.origin, q.destination, q.travel_date.isoformat(), url,
-                                                   status, len(fares), round(time.monotonic() - t0, 1)))
-                        log.info("[%s] %s %s -> %d fares", self.name, q.route, q.travel_date, len(fares))
-                    except Exception as exc:
-                        msg = f"{type(exc).__name__}: {str(exc)[:200]}"
-                        status = "blocked" if _looks_blocked(msg) else "error"
-                        results.append(QueryResult(q.origin, q.destination, q.travel_date.isoformat(), url,
-                                                   status, 0, round(time.monotonic() - t0, 1), msg))
-                        log.error("[%s] %s %s -> %s", self.name, q.route, q.travel_date, msg)
+                    fares, status, msg = self._scrape_with_retry(page, q, url)
+                    records.extend(fares)
+                    results.append(QueryResult(q.origin, q.destination, q.travel_date.isoformat(), url,
+                                               status, len(fares), round(time.monotonic() - t0, 1), msg))
             finally:
                 context.close()
                 browser.close()
 
-        return self.write_snapshot(run_id, started, queries, results, records)
+        path = self.write_snapshot(run_id, started, queries, results, records)
+        self._record_health(started, results, len(records))
+        return path
+
+    def _scrape_with_retry(self, page, q: Query, url: str) -> tuple[list[RawFare], str, str | None]:
+        """
+        Retry a query with exponential backoff and jitter.
+
+        A single flaky navigation should not cost a whole cell in the basket —
+        a missing (route, window) silently narrows index coverage for that day.
+        Blocks are not retried: if a site is refusing us, hammering it is both
+        useless and rude, and the rate limiter's gap is the polite floor.
+        """
+        last_msg: str | None = None
+        for attempt in range(1, self.max_attempts + 1):
+            self.limiter.wait()
+            try:
+                fares = self.scrape_query(page, q, url)
+                if fares:
+                    log.info("[%s] %s %s -> %d fares", self.name, q.route, q.travel_date, len(fares),
+                             extra={"source": self.name, "route": q.route, "n_fares": len(fares),
+                                    "attempt": attempt})
+                    return fares, "ok", None
+                # "empty" is a legitimate answer (sold out, no service that day),
+                # so accept it rather than burning retries on a real zero.
+                log.info("[%s] %s %s -> no fares", self.name, q.route, q.travel_date,
+                         extra={"source": self.name, "route": q.route, "n_fares": 0})
+                return [], "empty", None
+            except Exception as exc:
+                last_msg = f"{type(exc).__name__}: {str(exc)[:200]}"
+                if _looks_blocked(last_msg):
+                    log.error("[%s] %s %s blocked -> %s", self.name, q.route, q.travel_date, last_msg,
+                              extra={"source": self.name, "route": q.route, "status": "blocked"})
+                    return [], "blocked", last_msg
+                if attempt < self.max_attempts:
+                    backoff = self.retry_base_s * (2 ** (attempt - 1)) + random.uniform(0, 1.0)
+                    log.warning("[%s] %s %s attempt %d/%d failed (%s); retry in %.1fs",
+                                self.name, q.route, q.travel_date, attempt, self.max_attempts, last_msg, backoff,
+                                extra={"source": self.name, "route": q.route, "attempt": attempt})
+                    time.sleep(backoff)
+        log.error("[%s] %s %s failed after %d attempts -> %s", self.name, q.route, q.travel_date,
+                  self.max_attempts, last_msg,
+                  extra={"source": self.name, "route": q.route, "status": "error"})
+        return [], "error", last_msg
+
+    def _record_health(self, started: datetime, results: list[QueryResult], n_records: int) -> None:
+        """Persist per-source health so /health can answer without reading logs."""
+        n_ok = sum(1 for r in results if r.status == "ok")
+        n_failed = sum(1 for r in results if r.status in ("error", "blocked"))
+        errors = [r.error for r in results if r.error]
+        # "degraded" matters: a source returning nothing looks identical to one
+        # that was never scheduled unless we say so explicitly.
+        if n_ok and not n_failed:
+            status = "ok"
+        elif n_ok:
+            status = "degraded"
+        else:
+            status = "failing"
+        now = timeutil.stamp()
+        try:
+            from pipeline.db import session
+            with session() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO source_health
+                        (source, last_run_at, last_ok_at, status, n_ok, n_failed, n_records, last_error, updated_at)
+                    VALUES (?,?,?,?,?,?,?,?,?)
+                    ON CONFLICT(source) DO UPDATE SET
+                        last_run_at = excluded.last_run_at,
+                        last_ok_at  = COALESCE(excluded.last_ok_at, source_health.last_ok_at),
+                        status      = excluded.status,
+                        n_ok        = excluded.n_ok,
+                        n_failed    = excluded.n_failed,
+                        n_records   = excluded.n_records,
+                        last_error  = excluded.last_error,
+                        updated_at  = excluded.updated_at
+                    """,
+                    (self.name, started.isoformat(timespec="seconds"), now if n_ok else None,
+                     status, n_ok, n_failed, n_records, errors[0] if errors else None, now),
+                )
+        except Exception as exc:  # health must never sink a completed scrape
+            log.warning("could not write source_health for %s: %s", self.name, exc)
 
     def write_snapshot(self, run_id, started, queries, results, records) -> Path:
         snapshot = {
             "source": self.name,
             "run_id": run_id,
             "scraped_at": started.isoformat(timespec="seconds"),
-            "finished_at": datetime.now().isoformat(timespec="seconds"),
+            "finished_at": timeutil.stamp(),
             "robots_checked": True,
             "min_gap_s": self.min_gap_s,
             "n_queries": len(queries),

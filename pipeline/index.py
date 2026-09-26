@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
+from pipeline import timeutil
 from pipeline.db import INDEX_FILTER, session
 
 log = logging.getLogger("pipeline.index")
@@ -115,7 +116,7 @@ def compute_index_daily(conn) -> list[dict]:
         series.append(row)
         conn.execute(
             "INSERT INTO index_daily (date, value, n_records, n_routes, coverage, is_synthetic, computed_at) VALUES (?,?,?,?,?,?,?)",
-            (d, value, n_records, len(route_rel), coverage, row["is_synthetic"], datetime.now().isoformat(timespec="seconds")),
+            (d, value, n_records, len(route_rel), coverage, row["is_synthetic"], timeutil.stamp()),
         )
     return series
 

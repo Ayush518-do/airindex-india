@@ -8,10 +8,18 @@ python-dotenv>=1.0
 # Scraper
 playwright>=1.45
 
+# Scheduling (APScheduler's persistent job store needs SQLAlchemy)
+apscheduler>=3.10,<4
+sqlalchemy>=2.0
+
 # Pipeline / modelling
 pandas>=2.2
 numpy>=1.26
 scikit-learn>=1.5
 
-# Alerts
+# HTTP (MoSPI, Brevo)
 requests>=2.32
+
+# Tests
+pytest>=8.0
+httpx>=0.27

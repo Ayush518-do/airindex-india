@@ -25,6 +25,31 @@ services:
         "--reload", "--reload-dir", "backend", "--reload-dir", "pipeline",
       ]
 
+  # Daily scrape -> pipeline -> alerts, plus the monthly MoSPI refresh.
+  # Shares ./data with the API, so the API serves whatever this collects.
+  # Opt-in (profile) so a plain `docker compose up` never starts a second
+  # scheduler alongside the Windows Task Scheduler one — two schedulers would
+  # scrape every site twice. Start it explicitly:
+  #   docker compose --profile scheduler up -d scheduler
+  scheduler:
+    profiles: ["scheduler"]
+    build:
+      context: .
+      dockerfile: scraper/Dockerfile
+    environment:
+      DEMO_MODE: "0"
+      TZ: Asia/Kolkata
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - ./data:/app/data
+      - ./pipeline:/app/pipeline
+      - ./scraper:/app/scraper
+    restart: unless-stopped
+    # Chromium needs more shared memory than Docker's 64 MB default.
+    shm_size: "1gb"
+
   frontend:
     build:
       context: ./frontend

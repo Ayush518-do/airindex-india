@@ -26,6 +26,8 @@ from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
+from pipeline import timeutil
+from pipeline.cities import route_label, route_short_label
 from pipeline.db import ROOT, session
 
 load_dotenv(ROOT / ".env")
@@ -37,27 +39,51 @@ COOLDOWN_HOURS = 24
 BREVO_URL = "https://api.brevo.com/v3/smtp/email"
 
 
+def latest_date(conn) -> str | None:
+    return conn.execute("SELECT MAX(date) AS d FROM route_daily").fetchone()["d"]
+
+
+def fare_levels(conn, route: str, latest: str | None = None) -> dict:
+    """
+    Today's mean fare vs the trailing baseline for one route.
+
+    The single source of truth for "is this route cheap right now". Both the
+    emailing job and the /routes/{id}/alerts endpoint call this, so the page a
+    user looks at and the email they receive can never disagree.
+    """
+    latest = latest or latest_date(conn)
+    if not latest:
+        return {"date": None, "today": None, "baseline": None, "pct_below": None, "is_cheap": False}
+    today = conn.execute(
+        "SELECT AVG(avg_fare) AS v FROM route_daily WHERE route = ? AND date = ?", (route, latest)
+    ).fetchone()["v"]
+    base = conn.execute(
+        "SELECT AVG(avg_fare) AS v FROM route_daily WHERE route = ? AND date < ? AND date >= date(?, ?)",
+        (route, latest, latest, f"-{BASELINE_DAYS} days"),
+    ).fetchone()["v"]
+    pct = (base - today) / base if today and base else None
+    return {
+        "date": latest,
+        "today": round(today) if today else None,
+        "baseline": round(base) if base else None,
+        "pct_below": round(pct * 100, 1) if pct is not None else None,
+        "is_cheap": bool(pct is not None and pct > THRESHOLD),
+    }
+
+
 def evaluate(conn) -> list[dict]:
     """One row per saved route with today's fare, baseline and cheap flag."""
-    latest = conn.execute("SELECT MAX(date) AS d FROM route_daily").fetchone()["d"]
+    latest = latest_date(conn)
     if not latest:
         return []
     out = []
     for r in conn.execute("SELECT * FROM saved_routes"):
         route = f"{r['origin']}-{r['destination']}"
-        today = conn.execute("SELECT AVG(avg_fare) AS v FROM route_daily WHERE route = ? AND date = ?", (route, latest)).fetchone()["v"]
-        base = conn.execute(
-            "SELECT AVG(avg_fare) AS v FROM route_daily WHERE route = ? AND date < ? AND date >= date(?, ?)",
-            (route, latest, latest, f"-{BASELINE_DAYS} days"),
-        ).fetchone()["v"]
-        pct = (base - today) / base if today and base else None
         out.append({
             "id": r["id"], "browser_id": r["browser_id"], "email": r["email"], "route": route,
-            "preferred_days": r["preferred_days"], "date": latest,
-            "today": round(today) if today else None, "baseline": round(base) if base else None,
-            "pct_below": round(pct * 100, 1) if pct is not None else None,
-            "is_cheap": bool(pct is not None and pct > THRESHOLD),
+            "preferred_days": r["preferred_days"],
             "last_notified_at": r["last_notified_at"],
+            **fare_levels(conn, route, latest),
         })
     return out
 
@@ -65,7 +91,7 @@ def evaluate(conn) -> list[dict]:
 def _in_cooldown(last: str | None) -> bool:
     if not last:
         return False
-    return datetime.fromisoformat(last) > datetime.now() - timedelta(hours=COOLDOWN_HOURS)
+    return datetime.fromisoformat(last) > timeutil.now() - timedelta(hours=COOLDOWN_HOURS)
 
 
 def send_email(to: str, subject: str, html: str) -> bool:
@@ -92,14 +118,19 @@ def send_email(to: str, subject: str, html: str) -> bool:
 
 
 def _render(a: dict) -> tuple[str, str]:
-    subject = f"✈ {a['route']} is {a['pct_below']}% cheaper than usual — ₹{a['today']:,}"
+    # Full city names, not codes: "DEL-BOM" means nothing in an inbox.
+    label = route_label(a["route"])
+    short = route_short_label(a["route"])
+    subject = f"✈ {short} flights are {a['pct_below']}% cheaper than usual — ₹{a['today']:,}"
     html = f"""
-    <div style="font-family:system-ui,sans-serif;max-width:520px">
-      <h2 style="margin:0 0 8px">Low fare alert: {a['route']}</h2>
-      <p>Today's average nonstop economy fare on <b>{a['route']}</b> is
-         <b>₹{a['today']:,}</b> — <b>{a['pct_below']}% below</b> its {BASELINE_DAYS}-day baseline of ₹{a['baseline']:,}.</p>
-      <p style="color:#666;font-size:13px">Based on fares scraped on {a['date']}. You're receiving this because you saved this route on AIRINDEX INDIA.
-         You won't get another alert for this route for {COOLDOWN_HOURS} hours.</p>
+    <div style="font-family:system-ui,sans-serif;max-width:520px;color:#1f2a44">
+      <h2 style="margin:0 0 8px">Good time to book: {label}</h2>
+      <p>Flights from <b>{label}</b> are averaging <b>₹{a['today']:,}</b> today.
+         That's <b>{a['pct_below']}% cheaper</b> than the usual price over the last
+         {BASELINE_DAYS} days (₹{a['baseline']:,}).</p>
+      <p style="color:#5b6478;font-size:13px">
+         Based on nonstop economy fares we checked on {a['date']}. You're getting this because
+         you set an alert for this route. We won't email you about it again for {COOLDOWN_HOURS} hours.</p>
     </div>"""
     return subject, html
 
@@ -120,7 +151,7 @@ def run(dry_run: bool = False) -> dict:
                 continue
             if send_email(a["email"], subject, html):
                 conn.execute("UPDATE saved_routes SET last_notified_at = ? WHERE id = ?",
-                             (datetime.now().isoformat(timespec="seconds"), a["id"]))
+                             (timeutil.stamp(), a["id"]))
                 sent += 1
     result = {"cheap_routes": cheap, "emails_sent": sent, "skipped_cooldown": skipped_cooldown,
               "brevo_configured": bool(os.environ.get("BREVO_API_KEY", "").strip())}

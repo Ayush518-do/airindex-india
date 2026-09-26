@@ -30,6 +30,7 @@ from collections import defaultdict
 from datetime import date, datetime
 from pathlib import Path
 
+from pipeline import timeutil
 from pipeline.db import RAW_DIR, session
 from scraper.base import DEFAULT_OFFSETS
 
@@ -126,7 +127,7 @@ def ingest(path: Path, conn) -> tuple[int, int]:
         " VALUES (?,?,?,?,?,?,?,?,?,?)",
         (path.name, snapshot["source"], snapshot["scraped_at"], snapshot["scraped_at"][:10],
          snapshot.get("n_queries"), n_ok, len(snapshot.get("records", [])), len(rows),
-         1 if snapshot.get("synthetic") else 0, datetime.now().isoformat(timespec="seconds")),
+         1 if snapshot.get("synthetic") else 0, timeutil.stamp()),
     )
     if rows:
         cols = list(rows[0].keys())
