@@ -16,13 +16,13 @@ export default function HeroStat({ daily, meta }: { daily: IndexDaily; meta: Met
   return (
     <div className="relative" data-tour="index">
       {heavyEffects && (
-        // Pastel particles drifting behind the cards; they part around the cursor.
+        // Sky and peach particles drifting behind the cards; they part around the cursor.
         <div aria-hidden className="pointer-events-none absolute -inset-4 opacity-70">
           <Particles
             particleCount={110}
             particleSpread={10}
             speed={0.05}
-            particleColors={['#8b7cf6', '#5aa2e8', '#a9c9f2']}
+            particleColors={['#8fb3d9', '#bfd6ea', '#f3dcc8']}
             moveParticlesOnHover
             particleHoverFactor={0.5}
             alphaParticles

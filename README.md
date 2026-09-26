@@ -145,11 +145,13 @@ Or with Docker (API + website; the scheduler is opt-in, see below):
 docker compose up -d backend frontend
 ```
 
-The website has six pages, each with its own URL (deep links and the back button work):
+The website opens on a landing page, then has six pages, each with its own URL (deep
+links and the back button work):
 
 | Page | URL | What's on it |
 |---|---|---|
-| Home | `/` | today's index, a plain-English summary, and quick answers: cheapest route today, best time to book, next festival price jump |
+| Landing | `/` | full-screen hero video, live numbers, how it works, why it matters, the team |
+| Home | `/home` | today's index, a plain-English summary, and quick answers: cheapest route today, best time to book, next festival price jump |
 | Routes | `/routes?from=DEL&to=BOM` | city search, best time to book, prices by booking time, the price map, and the individual flights found |
 | Festivals | `/festivals` | how much fares jump around each festival, per route |
 | Official data | `/official` | MoSPI's monthly airfare index since 2014, and how APIx lines up with it |
@@ -396,9 +398,10 @@ scraper/sources/    easemytrip.py, spicejet.py (+ registry in __init__.py)
 pipeline/           db.py, clean.py, index.py, cities.py, mospi.py, official_compare.py,
                     trend_forecast.py, fare_model.py, festivals.py, notifier.py, timeutil.py, run_all.py
 backend/            main.py (FastAPI), schemas.py (response models), requirements.txt
-frontend/src/       App.tsx (routes), pages/ (Home, Routes, Festivals/Official/Alerts/About),
+frontend/src/       App.tsx (routes), pages/ (Landing, Home, Routes, Festivals/Official/Alerts/About),
                     components/ (TopBar, Layout, CityCombobox, QuickCards, BestTimeCard, charts, ui.tsx, reactbits/),
-                    lib/ (appData, cities, glossary, motion), services/api.ts
+                    lib/ (appData, cities, glossary, motion, team), services/api.ts
+frontend/public/media/  hero video loop, poster and transition clip
 scripts/            build_demo_db.py, install_scheduler_task.ps1
 tests/              pytest suite; fixtures/ (synthetic generators, recorded MoSPI responses)
 data/raw/           cached JSON snapshots (committed)
@@ -419,13 +422,33 @@ data/models/        fare_model.pkl (rebuilt, git-ignored)
   `available: false` message, and a friendly error with **Retry**. If the API is down the
   whole site shows one message with Retry instead of a broken page.
 * **Accessible and mobile-first.** Works at 375 px (menu collapses to ☰; charts switch to
-  compact labels), WCAG AA colours (muted text 5.57:1, chart marks ≥ 3:1), visible focus
+  compact labels), WCAG AA colours (muted text ≥ 4.9:1, chart marks ≥ 3:1), visible focus
   rings, full keyboard navigation with a skip link, focus moved to the content on each page
   change, and `aria-label`s on icon buttons and every chart.
-* **Motion** uses React Bits components (Aurora, Particles, BlurText, AnimatedContent,
-  CountUp, GlareHover, Magnet, BlobCursor, ClickSpark). `src/lib/motion.ts` turns heavy
-  effects off under *prefers-reduced-motion* and cursor effects off on touch screens.
-  Animations never gate data.
+* **Landing page** (`src/pages/LandingPage.tsx`). A calm 8-second loop of flying alongside
+  the plane (`public/media/hero-cruise.*`; 1280w encode below 768 px), with a slow sideways
+  drift and slight mouse parallax, never a zoom. The poster paints first and the video
+  streams in behind it. The still is shown instead under reduced motion, with Data Saver,
+  or on a 2G-class connection. Add `?video=1` to force the video, which helps when venue
+  Wi-Fi misreports its speed, or `?video=0` to force the still. "Explore today's fares"
+  plays `transition.mp4` (the plane passes the camera and the screen goes white), then the
+  dashboard fades in from white; Esc or a click skips it, and it's skipped entirely under
+  reduced motion. `hero.*` / `hero-mobile.mp4` (plane approaching) are kept but unused.
+* **Team details** live in one file, `src/lib/team.ts`. Replace the bracketed placeholders
+  with your team name, college, members, roles and mentor.
+* **Theme: "sky & clouds".** Cloud white `#F7F5F1`, sky blue `#BFD6EA` / `#8FB3D9`, sunrise
+  peach `#F3DCC8`, deep navy `#1B3556` (text and primary buttons) and slate `#5B6B80`,
+  defined once as CSS variables in `src/index.css`. Headings use Instrument Serif and body
+  text uses Inter (Google Fonts). Cards are frosted glass (72% white, backdrop blur) and
+  buttons are pill-shaped. Inner pages sit on a pale-sky gradient with a few slowly
+  drifting clouds. Charts use navy for our index, sky blue for comparisons and peach for
+  highlights; the price map runs from pale sky (cheap) to navy (expensive). Pale sky and
+  peach are fills only; text uses darker partners (`sky-ink`, `peach-ink`), so every
+  pairing stays at WCAG AA, including on glass over the sky.
+* **Motion** uses React Bits components (BlurText, AnimatedContent, CountUp, GlareHover,
+  Magnet, Particles, BlobCursor, ClickSpark). `src/lib/motion.ts` turns heavy effects off
+  under *prefers-reduced-motion* and cursor effects off on touch screens. Animations never
+  gate data.
 
 ## Adding a source
 

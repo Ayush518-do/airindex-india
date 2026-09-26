@@ -98,27 +98,27 @@ export function ElasticityChart({ trend, error, onRetry }: { trend: RouteTrend |
             <YAxis stroke={GRID} width={56} tick={axisTick} tickLine={false} axisLine={false}
               tickFormatter={inrShort} label={axisLabel('Fare (₹)', -90)} />
             <Tooltip
-              contentStyle={tooltipStyle} cursor={{ fill: 'rgba(47,120,201,0.06)' }}
+              contentStyle={tooltipStyle} cursor={{ fill: 'rgba(143,179,217,0.14)' }}
               formatter={(v: any, name: string) => [v == null ? '—' : inr(Number(v)), name === 'actual_avg' ? 'Average fare' : 'Our estimate']}
               labelFormatter={(l) => `Booked ${l}`}
             />
             <Legend verticalAlign="top" align="right" height={30}
               formatter={(v) => <span style={{ color: INK, fontSize: 13 }}>{v === 'actual_avg' ? 'Average fare' : 'Our estimate'}</span>} />
-            <Bar dataKey="actual_avg" fill={SERIES.blue} radius={[6, 6, 0, 0]} maxBarSize={60}>
-              {rows.map((r, i) => <Cell key={i} fill={best && r.window === best.window ? STATUS.good : SERIES.blue} />)}
+            <Bar dataKey="actual_avg" fill={SERIES.navy} radius={[6, 6, 0, 0]} maxBarSize={60}>
+              {rows.map((r, i) => <Cell key={i} fill={best && r.window === best.window ? SERIES.peach : SERIES.navy} />)}
               <LabelList dataKey="actual_avg" position="top"
                 formatter={(v: any) => (v == null ? '' : inrShort(Number(v)))}
                 style={{ fill: INK, fontSize: 12, fontWeight: 600 }} />
             </Bar>
             {hasPred && (
-              <Line type="monotone" dataKey="predicted_avg" stroke={SERIES.orange} strokeWidth={2} strokeDasharray="6 4"
-                connectNulls dot={{ r: 4, fill: SERIES.orange, strokeWidth: 2, stroke: '#ffffff' }} />
+              <Line type="monotone" dataKey="predicted_avg" stroke={SERIES.sky} strokeWidth={2} strokeDasharray="6 4"
+                connectNulls dot={{ r: 4, fill: SERIES.sky, strokeWidth: 2, stroke: '#ffffff' }} />
             )}
           </ComposedChart>
         </ResponsiveContainer>
       </div>
       <p className="mt-1 text-[13px] text-ink-3">
-        {best && <>The green bar is the cheapest time to book. </>}
+        {best && <>The peach bar is the cheapest time to book. </>}
         {hasPred && <>The dashed line is <span className="font-medium text-ink-2">our estimate</span> — typically within about {trend.model?.holdout_mape_pct ?? 10}% of the real fare.</>}
       </p>
 

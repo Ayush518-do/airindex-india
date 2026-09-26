@@ -7,30 +7,39 @@
  *
  * Stored as bare RGB channels so Tailwind's opacity modifiers keep working
  * (`bg-accent/10`, `border-line/60`); tailwind.config.js maps each one to a
- * utility name. Every text/background pairing here was checked against WCAG AA
- * (>= 4.5:1 for text, >= 3:1 for chart marks); the most muted text, ink-3,
- * still reaches 5.57:1 on the page background.
+ * utility name.
  *
- * Palette reference: the intro splash — daylight sky blue and soft lavender.
+ * Palette: "sky & clouds", taken from the landing video — cloud white, soft
+ * sky blue, sunrise peach, deep navy (the AIRINDEX livery) and slate.
+ * Contrast was checked for every text colour on the page, on white, and on
+ * the worst case for the frosted cards (72% white over #BFD6EA sky):
+ *   ink 11.2:1 · ink-2 8.4:1 · ink-3 4.9:1 · sky-ink 6.0:1 · peach-ink 6.0:1.
+ * The pale sky and peach themselves are fills only, never text.
  */
 :root {
-  --page: 244 247 251;        /* #f4f7fb  cool near-white page */
-  --surface: 255 255 255;     /* #ffffff  cards */
-  --surface-2: 238 243 249;   /* #eef3f9  inputs, tiles, table stripes */
-  --line: 227 233 242;        /* #e3e9f2  hairlines */
-  --line-strong: 203 214 229; /* #cbd6e5  input borders */
+  --page: 247 245 241;        /* #f7f5f1  cloud white */
+  --surface: 255 255 255;     /* #ffffff  solid white (inputs, menus) */
+  --surface-2: 238 243 248;   /* #eef3f8  tiles, table stripes */
+  --line: 223 230 238;        /* #dfe6ee  hairlines */
+  --line-strong: 196 209 224; /* #c4d1e0  input borders */
 
-  --ink: 20 33 61;            /* #14213d  headings, key numbers   14.3:1 */
-  --ink-2: 59 71 96;          /* #3b4760  body text                8.3:1 */
-  --ink-3: 86 97 121;         /* #566179  captions, axis labels    5.6:1 */
+  --ink: 27 53 86;            /* #1b3556  deep navy — headings, key numbers */
+  --ink-2: 52 72 99;          /* #344863  body text */
+  --ink-3: 91 107 128;        /* #5b6b80  slate — captions, axis labels */
 
-  --accent: 90 72 216;        /* #5a48d8  lavender buttons (white text 6.3:1) */
-  --accent-ink: 74 59 196;    /* #4a3bc4  lavender text/links      6.9:1 */
-  --accent-soft: 237 233 255; /* #ede9ff  lavender tint */
+  --accent: 27 53 86;         /* #1b3556  navy primary buttons (white text 12.4:1) */
+  --accent-hover: 42 74 115;  /* #2a4a73  button hover (white text 9.0:1) */
+  --accent-ink: 27 53 86;     /* #1b3556  links, active nav text */
+  --accent-soft: 225 236 247; /* #e1ecf7  active nav, selected rows */
 
-  --sky: 36 104 180;          /* #2468b4  sky-blue fill (white text 5.7:1) */
-  --sky-ink: 29 95 168;       /* #1d5fa8  sky-blue text            5.8:1 */
-  --sky-soft: 228 240 252;    /* #e4f0fc  sky tint */
+  --sky: 143 179 217;         /* #8fb3d9  soft sky — fills and decoration only */
+  --sky-2: 191 214 234;       /* #bfd6ea  pale sky */
+  --sky-ink: 44 94 148;       /* #2c5e94  sky-blue text */
+  --sky-soft: 228 238 248;    /* #e4eef8  sky tint */
+
+  --peach: 243 220 200;       /* #f3dcc8  sunrise peach — highlights, fills only */
+  --peach-ink: 143 74 28;     /* #8f4a1c  text on / about peach (5.0:1 on peach) */
+  --peach-soft: 251 239 229;  /* #fbefe5 */
 
   --good: 18 112 58;          /* #12703a  cheaper / on track */
   --good-soft: 227 245 233;
@@ -39,8 +48,11 @@
   --warn: 122 79 0;           /* #7a4f00  caution (demo mode, pending) */
   --warn-soft: 255 242 204;
 
-  --shadow-card: 0 1px 2px rgb(20 33 61 / 0.04), 0 8px 24px -12px rgb(20 33 61 / 0.12);
-  --shadow-pop: 0 12px 32px -8px rgb(20 33 61 / 0.22);
+  --shadow-card: 0 1px 2px rgb(27 53 86 / 0.03), 0 18px 40px -24px rgb(27 53 86 / 0.18);
+  --shadow-pop: 0 18px 44px -12px rgb(27 53 86 / 0.24);
+
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Instrument Serif', 'Playfair Display', Georgia, serif;
 
   color-scheme: light;
 }
@@ -50,7 +62,7 @@
 html, body, #root { min-height: 100%; }
 
 body {
-  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   background: rgb(var(--page));
   color: rgb(var(--ink));
@@ -60,7 +72,7 @@ body {
 :focus-visible {
   outline: 2px solid rgb(var(--accent-ink));
   outline-offset: 2px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -69,29 +81,71 @@ body {
 ::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink-3) / 0.5); }
 
 @layer components {
-  /* Every panel. Solid white rather than translucent glass: the animated
-     background sits behind it, and translucency would lower text contrast
-     unpredictably as the background moves. */
+  /* Frosted-glass panel. 72% white is the floor: the sky behind it is at
+     most #BFD6EA, which keeps the slate caption text at 4.9:1. Browsers
+     without backdrop-filter get a near-solid card instead. */
   .card {
-    background: rgb(var(--surface));
-    border: 1px solid rgb(var(--line));
-    border-radius: 1rem;
+    background: rgb(255 255 255 / 0.72);
+    border: 1px solid rgb(255 255 255 / 0.75);
+    border-radius: 1.5rem;
     box-shadow: var(--shadow-card);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    backdrop-filter: blur(16px) saturate(140%);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .card { background: rgb(255 255 255 / 0.94); }
   }
   .field {
-    @apply w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-[14px] text-ink
-           placeholder:text-ink-3 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
+    @apply w-full rounded-xl border border-line-strong bg-surface px-3.5 py-2 text-[14px] text-ink
+           placeholder:text-ink-3 focus:border-accent focus:outline-none focus:ring-2 focus:ring-sky/50;
   }
   .btn-primary {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-[14px]
-           font-semibold text-white shadow-sm transition-colors hover:bg-accent-ink
+    @apply inline-flex items-center justify-center gap-2 rounded-full bg-accent px-5 py-2 text-[14px]
+           font-semibold text-white shadow-sm transition-colors hover:bg-accent-hover
            disabled:cursor-not-allowed disabled:opacity-50;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-line-strong bg-surface
-           px-3 py-2 text-[14px] font-medium text-ink-2 transition-colors hover:border-accent hover:text-accent-ink;
+    @apply inline-flex items-center justify-center gap-2 rounded-full border border-line-strong bg-white/70
+           px-4 py-2 text-[14px] font-medium text-ink-2 backdrop-blur transition-colors
+           hover:border-accent hover:text-accent-ink;
   }
+  /* Small uppercase labels: wide tracking, airy. */
+  .eyebrow {
+    @apply text-[12px] font-semibold uppercase tracking-[0.16em] text-sky-ink;
+  }
+  .font-display { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.01em; }
 }
+
+/* ------------------------------------------------------------ sky layer -- */
+/* Inner pages: pale sky at the top fading into cloud white, with a few soft
+   cloud shapes drifting very slowly. Static under reduced motion. */
+.sky-backdrop {
+  background: linear-gradient(180deg, rgb(var(--sky-2) / 0.85) 0%, rgb(var(--sky-soft) / 0.9) 32%, rgb(var(--page)) 72%);
+}
+.sky-cloud {
+  position: absolute;
+  border-radius: 9999px;
+  background: radial-gradient(closest-side, rgb(255 255 255 / 0.95), rgb(255 255 255 / 0) 100%);
+  filter: blur(6px);
+  animation: cloud-drift var(--drift, 120s) linear infinite;
+  animation-delay: var(--delay, 0s);
+  will-change: transform;
+}
+@keyframes cloud-drift {
+  from { transform: translateX(-40vw); }
+  to   { transform: translateX(140vw); }
+}
+
+/* Landing hero video: a slow sideways drift, like flying alongside. */
+@keyframes hero-drift {
+  0%, 100% { transform: translate3d(1.5%, 0, 0); }
+  50%      { transform: translate3d(-1.5%, 0, 0); }
+}
+.hero-drift { animation: hero-drift 22s ease-in-out infinite; }
+
+/* White fade-in after the landing → dashboard transition. */
+@keyframes white-out { from { opacity: 1; } to { opacity: 0; visibility: hidden; } }
+.white-fade { animation: white-out 0.7s ease-out 0.05s forwards; }
 
 /* Skeleton shimmer for loading states. Disabled under reduced motion. */
 @keyframes shimmer { 100% { transform: translateX(100%); } }
@@ -112,5 +166,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton::after { animation: none; }
+  .sky-cloud, .hero-drift { animation: none !important; }
+  .white-fade { display: none; }
   *, *::before, *::after { scroll-behavior: auto !important; }
 }

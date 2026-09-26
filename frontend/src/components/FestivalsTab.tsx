@@ -16,14 +16,14 @@ import { friendlyError, getFestivalSurge, type FestivalSurge, type SurgeRow } fr
 // A fixed colour per festival, so a festival keeps its colour whichever others
 // are present. All clear 3:1 against white (checked).
 const FESTIVAL_COLORS: Record<string, string> = {
-  'Diwali': SERIES.orange,
-  'Dussehra': SERIES.aqua,
-  'Ganesh Chaturthi': SERIES.blue,
-  'Holi': SERIES.violet,
+  'Diwali': SERIES.peach,
+  'Dussehra': SERIES.sky,
+  'Ganesh Chaturthi': SERIES.navy,
+  'Holi': SERIES.plum,
   'Christmas / New Year': '#b3336c',
-  'Chhath Puja': '#9a5b00',
+  'Chhath Puja': SERIES.teal,
 };
-const colorFor = (f: string) => FESTIVAL_COLORS[f] ?? '#5e6b85';
+const colorFor = (f: string) => FESTIVAL_COLORS[f] ?? '#5b6b80';
 
 function change(pct: number) {
   if (Math.abs(pct) < 1) return <span className="text-ink-2">about the same</span>;
@@ -94,7 +94,7 @@ export default function FestivalsTab({ routes }: { routes: string[] }) {
                     tickFormatter={v => `${v > 0 ? '+' : ''}${v}%`} label={axisLabel('Price change', -90)} />
                   <ReferenceLine y={0} stroke={INK_3} strokeOpacity={0.5} />
                   <Tooltip
-                    contentStyle={tooltipStyle} cursor={{ fill: 'rgba(47,120,201,0.06)' }}
+                    contentStyle={tooltipStyle} cursor={{ fill: 'rgba(143,179,217,0.14)' }}
                     labelFormatter={(_l, payload) => routeLabel(String(payload?.[0]?.payload?.route ?? ''))}
                     formatter={(v: any, name: string, p: any) => {
                       const s = data.surge.find(x => x.route === p.payload.route && x.festival === name);

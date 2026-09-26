@@ -106,9 +106,9 @@ export default function OfficialCpiPanel() {
               formatter={(v: any, name: string) => [Number(v).toFixed(1), name === 'official' ? 'Official index' : 'Our live index (same scale)']} />
             <Legend verticalAlign="top" align="right" height={30}
               formatter={v => <span style={{ color: INK, fontSize: 13 }}>{v === 'official' ? 'Official (MoSPI)' : 'Ours (live, same scale)'}</span>} />
-            <Line type="monotone" dataKey="official" stroke={SERIES.aqua} strokeWidth={2} dot={false} connectNulls={false} />
-            <Line type="monotone" dataKey="ours" stroke={SERIES.blue} strokeWidth={0}
-              dot={{ r: 5, fill: SERIES.blue, stroke: '#fff', strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />
+            <Line type="monotone" dataKey="official" stroke={SERIES.sky} strokeWidth={2} dot={false} connectNulls={false} />
+            <Line type="monotone" dataKey="ours" stroke={SERIES.navy} strokeWidth={0}
+              dot={{ r: 5, fill: SERIES.navy, stroke: '#fff', strokeWidth: 2 }} connectNulls={false} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </div>

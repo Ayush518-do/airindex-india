@@ -22,7 +22,7 @@ export default function CursorEffects() {
         trailCount={3}
         sizes={[14, 26, 20]}
         innerSizes={[6, 10, 8]}
-        fillColor="rgba(106, 88, 224, 0.28)"
+        fillColor="rgba(143, 179, 217, 0.38)"
         innerColor="rgba(255, 255, 255, 0.85)"
         opacities={[0.9, 0.5, 0.35]}
         shadowColor="rgba(0,0,0,0)"
@@ -33,7 +33,7 @@ export default function CursorEffects() {
         slowDuration={0.5}
         zIndex={55}
       />
-      <ClickSpark sparkColor="#5a48d8" sparkSize={8} sparkRadius={16} sparkCount={8} duration={380} />
+      <ClickSpark sparkColor="#d9895a" sparkSize={8} sparkRadius={16} sparkCount={8} duration={380} />
     </>
   );
 }

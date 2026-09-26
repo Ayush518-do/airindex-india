@@ -7,7 +7,7 @@ import { useAppData } from '../lib/appData';
 import { API_DOCS_URL } from '../services/api';
 
 export const NAV = [
-  { to: '/', label: 'Home', end: true },
+  { to: '/home', label: 'Home' },
   { to: '/routes', label: 'Routes' },
   { to: '/festivals', label: 'Festivals', tour: 'festivals-tab' },
   { to: '/official', label: 'Official data' },
@@ -33,8 +33,8 @@ export default function TopBar() {
   }, [menuOpen]);
 
   const linkClass = ({ isActive }: { isActive: boolean }) =>
-    `relative shrink-0 rounded-lg px-3 py-1.5 text-[14px] transition-colors ${
-      isActive ? 'bg-accent-soft font-semibold text-accent-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'
+    `relative shrink-0 rounded-full px-3.5 py-1.5 text-[14px] transition-colors ${
+      isActive ? 'bg-accent-soft font-semibold text-accent-ink' : 'text-ink-2 hover:bg-white/80 hover:text-ink'
     }`;
 
   const alertBadge = (
@@ -45,17 +45,17 @@ export default function TopBar() {
   );
 
   return (
-    <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur-md">
+    <header className="sticky top-0 z-30 border-b border-white/60 bg-white/70 backdrop-blur-xl">
       <div className="mx-auto flex max-w-[1280px] items-center gap-3 px-4 py-2.5 md:px-8">
-        <Link to="/" className="flex min-w-0 items-baseline gap-2 rounded-lg" aria-label="AIRINDEX INDIA — home">
+        <Link to="/" className="flex min-w-0 items-baseline gap-2 rounded-lg" aria-label="AIRINDEX INDIA — welcome page">
           {/* Both ends of the shine gradient clear 4.5:1 on white. */}
-          <ShinyText text="AIRINDEX INDIA" className="text-[17px] font-bold tracking-tight"
-            color={INK} shineColor={SERIES.blue} speed={5} disabled={!heavyEffects} />
+          <ShinyText text="AIRINDEX INDIA" className="text-[16px] font-bold tracking-[0.12em]"
+            color={INK} shineColor={SERIES.sky} speed={5} disabled={!heavyEffects} />
         </Link>
 
         <nav aria-label="Main" className="ml-4 hidden items-center gap-0.5 lg:flex">
           {NAV.map(n => (
-            <NavLink key={n.to} to={n.to} end={'end' in n ? n.end : undefined} className={linkClass}
+            <NavLink key={n.to} to={n.to} className={linkClass}
               data-tour={'tour' in n ? n.tour : undefined}>
               {n.label}
               {n.to === '/alerts' && cheapCount > 0 && alertBadge}
@@ -84,7 +84,7 @@ export default function TopBar() {
           <button
             ref={menuBtn}
             type="button"
-            className="relative grid h-10 w-10 place-items-center rounded-lg border border-line bg-surface text-ink lg:hidden"
+            className="relative grid h-10 w-10 place-items-center rounded-full border border-line bg-white/80 text-ink lg:hidden"
             aria-label={menuOpen ? 'Close menu' : 'Open menu'}
             aria-expanded={menuOpen}
             aria-controls="mobile-menu"
@@ -99,12 +99,12 @@ export default function TopBar() {
       </div>
 
       {menuOpen && (
-        <nav id="mobile-menu" aria-label="Main" className="border-t border-line bg-surface px-4 pb-4 pt-2 lg:hidden">
+        <nav id="mobile-menu" aria-label="Main" className="border-t border-white/60 bg-white/90 px-4 pb-4 pt-2 backdrop-blur-xl lg:hidden">
           <ul className="grid gap-1">
             {NAV.map(n => (
               <li key={n.to}>
-                <NavLink to={n.to} end={'end' in n ? n.end : undefined}
-                  className={({ isActive }) => `flex items-center rounded-lg px-3 py-2.5 text-[15px] ${
+                <NavLink to={n.to}
+                  className={({ isActive }) => `flex items-center rounded-full px-4 py-2.5 text-[15px] ${
                     isActive ? 'bg-accent-soft font-semibold text-accent-ink' : 'text-ink-2 hover:bg-surface-2'}`}>
                   {n.label}
                   {n.to === '/alerts' && cheapCount > 0 && alertBadge}

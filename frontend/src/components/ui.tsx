@@ -11,26 +11,30 @@ import { useMotionSettings } from '../lib/motion';
  * status text >= 5.4:1, axis labels 6.2:1.
  */
 
-// Brand chrome (buttons, active tabs) — never a data series.
-export const ACCENT = '#5a48d8';
-export const ACCENT_INK = '#4a3bc4';
+// Brand chrome (buttons, active nav) — never a data series.
+export const ACCENT = '#1b3556';
+export const ACCENT_INK = '#1b3556';
 
+// Chart series, "sky & clouds": navy for our index / actual fares, sky blue
+// for anything it is compared with (official data), peach for highlights
+// (best time, estimates). All clear 3:1 against white and the page colour.
 export const SERIES = {
-  blue: '#2f78c9',    // our live index / actual fares
-  orange: '#c2521d',  // model estimate
-  aqua: '#0f7d5a',    // official government data
-  violet: '#6a58e0',
+  navy: '#1b3556',   // our live index / actual fares         12.4:1
+  sky: '#4a82bf',    // comparisons — official government data  4.0:1
+  peach: '#c26a32',  // highlights — best window, estimates      3.9:1
+  plum: '#8a4f86',   // extra categories (festivals)            5.9:1
+  teal: '#2f7f7a',   //                                          4.7:1
 } as const;
 
 export const STATUS = { good: '#12703a', critical: '#b42318', warning: '#7a4f00' } as const;
 
-// Heatmap: light = cheap, dark = expensive. Every step keeps its label at
-// >= 4.77:1 by switching label colour (see heatLabel).
-export const SEQ_RAMP = ['#e6f0fb', '#cfe2f7', '#b3d0f1', '#8fb8e8', '#6a9fdd', '#3874bd', '#2a64ab', '#1f5190', '#173f78'];
+// Heatmap: pale sky = cheap, navy = expensive. Each step keeps its label at
+// >= 4.65:1 by switching label colour (see heatLabel).
+export const SEQ_RAMP = ['#eaf1f8', '#d6e5f2', '#bfd6ea', '#a6c4e1', '#8fb3d9', '#7ca6d3', '#4d77a7', '#34598a', '#1b3556'];
 
-export const INK = '#14213d';
-export const INK_3 = '#566179';
-export const GRID = '#e3e9f2';
+export const INK = '#1b3556';
+export const INK_3 = '#5b6b80';
+export const GRID = '#dfe6ee';
 export const AXIS_INK = INK_3;
 
 /** Dark text on light ramp steps, white on dark ones. */
@@ -44,9 +48,9 @@ export function heatLabel(bg: string): string {
 
 export const tooltipStyle = {
   background: '#ffffff',
-  border: '1px solid #e3e9f2',
-  borderRadius: 12,
-  boxShadow: '0 12px 32px -8px rgba(20,33,61,0.22)',
+  border: '1px solid #dfe6ee',
+  borderRadius: 14,
+  boxShadow: '0 18px 44px -12px rgba(27,53,86,0.24)',
   fontSize: 13,
   color: INK,
 } as const;
@@ -177,11 +181,11 @@ export function StatCard({
   const { cursorEffects } = useMotionSettings();
   const body = (
     <div className="w-full p-5 text-left">
-      <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.08em] text-ink-3">
+      <p className="flex items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.14em] text-ink-3">
         {label}
         {info && <InfoTip>{info}</InfoTip>}
       </p>
-      <p className="mt-2 text-[40px] font-semibold leading-none tracking-tight text-ink tabular-nums">
+      <p className="mt-2 font-display text-[52px] leading-none text-ink tabular-nums">
         {prefix}<AnimatedNumber value={value} decimals={decimals} />{suffix}
       </p>
       {children}
@@ -190,9 +194,9 @@ export function StatCard({
   if (!cursorEffects) return <div className={`card h-full ${className}`}>{body}</div>;
   return (
     <GlareHover
-      width="100%" height="100%" background="#ffffff" borderRadius="1rem" borderColor="#e3e9f2"
-      glareColor="#9fb9e0" glareOpacity={0.35} glareAngle={-35} glareSize={220} transitionDuration={700}
-      className={`!block !cursor-default shadow-card ${className}`}
+      width="100%" height="100%" background="rgba(255,255,255,0.72)" borderRadius="1.5rem" borderColor="rgba(255,255,255,0.75)"
+      glareColor="#f3dcc8" glareOpacity={0.45} glareAngle={-35} glareSize={220} transitionDuration={700}
+      className={`!block !cursor-default shadow-card backdrop-blur-xl ${className}`}
     >
       {body}
     </GlareHover>

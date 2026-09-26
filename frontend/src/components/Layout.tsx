@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import Aurora from './reactbits/Aurora';
+import SkyBackdrop from './SkyBackdrop';
 import TopBar from './TopBar';
 import Guide, { guideDone } from './Guide';
 import { ErrorState, inr } from './ui';
 import { routeLabel } from '../lib/cities';
-import { useMotionSettings } from '../lib/motion';
 import { useAppData } from '../lib/appData';
 
 /**
@@ -13,8 +12,7 @@ import { useAppData } from '../lib/appData';
  * state (shown once here, with Retry, instead of every page failing on its
  * own), the cheap-fare banner, and the first-visit tour on Home.
  */
-export default function Layout({ introActive = false }: { introActive?: boolean }) {
-  const { heavyEffects } = useMotionSettings();
+export default function Layout() {
   const { meta, daily, loading, error, reload, alerts } = useAppData();
   const location = useLocation();
   const navigate = useNavigate();
@@ -32,34 +30,36 @@ export default function Layout({ introActive = false }: { introActive?: boolean 
     mainRef.current?.focus({ preventScroll: true });
   }, [location.pathname]);
 
-  const onHome = location.pathname === '/';
+  const onHome = location.pathname === '/home';
+  // Arriving from the landing page's fly-past: the screen is white, so fade in from white.
+  const fromFlight = (location.state as { fromFlight?: boolean } | null)?.fromFlight === true;
+  // Once the fade has run, drop the flag so a reload doesn't replay it.
+  useEffect(() => {
+    if (!fromFlight) return;
+    const t = window.setTimeout(() => navigate(location.pathname + location.search, { replace: true, state: null }), 900);
+    return () => clearTimeout(t);
+  }, [fromFlight, location.pathname, location.search, navigate]);
   const forceTour = params.get('tour') === '1';
 
-  // First-visit tour — Home only, after the intro, once there's data to point at.
+  // First-visit tour — Home only, once there is data to point at.
   useEffect(() => {
-    if (!onHome || introActive || loading || error || !daily?.available) { setShowGuide(false); return; }
+    if (!onHome || loading || error || !daily?.available) { setShowGuide(false); return; }
     if (!forceTour && guideDone()) return;
     const t = window.setTimeout(() => setShowGuide(true), 600);
     return () => clearTimeout(t);
-  }, [onHome, forceTour, introActive, loading, error, daily]);
+  }, [onHome, forceTour, loading, error, daily]);
 
   const closeGuide = () => {
     setShowGuide(false);
-    if (forceTour) navigate('/', { replace: true });
+    if (forceTour) navigate('/home', { replace: true });
   };
 
   const cheap = alerts?.alerts.filter(a => a.is_cheap) ?? [];
 
   return (
     <div className="relative min-h-screen">
-      {/* Slowly drifting pastel sky behind the top of the page, dimmed and faded
-          into the page colour (Aurora's light mode is opaque and saturated). */}
-      {heavyEffects && (
-        <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-[70vh] opacity-45">
-          <Aurora colorStops={['#9cc4f2', '#c3b6fb', '#a8d8f5']} amplitude={0.8} blend={0.7} speed={0.35} lightMode />
-        </div>
-      )}
-      <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-[70vh] bg-gradient-to-b from-transparent via-page/40 to-page" />
+      <SkyBackdrop />
+      {fromFlight && <div aria-hidden key={location.key} className="white-fade pointer-events-none fixed inset-0 z-[90] bg-white" />}
 
       <TopBar />
 

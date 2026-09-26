@@ -74,25 +74,25 @@ export default function TrendChart({ daily, forecast }: { daily: IndexDaily; for
               <Legend
                 verticalAlign="top" align="right" height={30}
                 payload={[
-                  { value: 'Price index', type: 'plainline', color: SERIES.blue, payload: { strokeDasharray: '0' } } as any,
-                  ...(hasForecast ? [{ value: 'Next 5 days (estimate)', type: 'plainline', color: SERIES.blue, payload: { strokeDasharray: '6 4' } } as any] : []),
-                  ...(example.length ? [{ value: 'Example data', type: 'rect', color: '#e6ebf3' } as any] : []),
+                  { value: 'Price index', type: 'plainline', color: SERIES.navy, payload: { strokeDasharray: '0' } } as any,
+                  ...(hasForecast ? [{ value: 'Next 5 days (estimate)', type: 'plainline', color: SERIES.navy, payload: { strokeDasharray: '6 4' } } as any] : []),
+                  ...(example.length ? [{ value: 'Example data', type: 'rect', color: '#e4eef8' } as any] : []),
                 ]}
                 formatter={(v) => <span style={{ color: INK, fontSize: 13 }}>{v}</span>}
               />
               {exFrom && exTo && (
-                <ReferenceArea x1={exFrom} x2={exTo} fill="#eef1f6" stroke="none"
+                <ReferenceArea x1={exFrom} x2={exTo} fill="#eef3f8" stroke="none"
                   label={{ value: 'example data', fill: INK_3, fontSize: 12, position: 'insideBottomLeft' }} />
               )}
-              <ReferenceLine y={100} stroke="#b8c4d6" strokeDasharray="4 4"
+              <ReferenceLine y={100} stroke="#8fb3d9" strokeDasharray="4 4"
                 label={{ value: 'first day = 100', fill: INK_3, fontSize: 12, position: 'insideTopLeft' }} />
-              {hasForecast && <Area type="monotone" dataKey="band" stroke="none" fill={SERIES.blue} fillOpacity={0.12} isAnimationActive={false} legendType="none" />}
-              <Line type="monotone" dataKey="actual" stroke={SERIES.blue} strokeWidth={2.5}
+              {hasForecast && <Area type="monotone" dataKey="band" stroke="none" fill={SERIES.navy} fillOpacity={0.12} isAnimationActive={false} legendType="none" />}
+              <Line type="monotone" dataKey="actual" stroke={SERIES.navy} strokeWidth={2.5}
                 dot={(p: any) => (p.payload.example || p.payload.actual == null || p.cy == null)
                   ? <g key={p.index} />
-                  : <circle key={p.index} cx={p.cx} cy={p.cy} r={4} fill={SERIES.blue} stroke="#ffffff" strokeWidth={2} />}
+                  : <circle key={p.index} cx={p.cx} cy={p.cy} r={4} fill={SERIES.navy} stroke="#ffffff" strokeWidth={2} />}
                 activeDot={{ r: 6, strokeWidth: 2, stroke: '#ffffff' }} />
-              {hasForecast && <Line type="monotone" dataKey="forecast" stroke={SERIES.blue} strokeWidth={2} strokeDasharray="6 4" dot={false} />}
+              {hasForecast && <Line type="monotone" dataKey="forecast" stroke={SERIES.navy} strokeWidth={2} strokeDasharray="6 4" dot={false} />}
             </ComposedChart>
           </ResponsiveContainer>
         </div>

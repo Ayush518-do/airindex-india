@@ -18,14 +18,14 @@ export default function PageHeader({ title, lead, children }: { title: string; l
         {heavyEffects ? (
           <>
             <h1 className="sr-only">{title}</h1>
-            <div aria-hidden className="text-[26px] font-semibold leading-tight tracking-tight text-ink sm:text-[30px]">
+            <div aria-hidden className="font-display text-[36px] leading-[1.1] text-ink sm:text-[44px]">
               <BlurText text={title} delay={60} animateBy="words" direction="top" stepDuration={0.28} />
             </div>
           </>
         ) : (
-          <h1 className="text-[26px] font-semibold leading-tight tracking-tight text-ink sm:text-[30px]">{title}</h1>
+          <h1 className="font-display text-[36px] leading-[1.1] text-ink sm:text-[44px]">{title}</h1>
         )}
-        {lead && <p className="mt-1.5 max-w-2xl text-[15px] leading-relaxed text-ink-2">{lead}</p>}
+        {lead && <p className="mt-2 max-w-2xl text-[16px] leading-relaxed text-ink-2">{lead}</p>}
       </div>
       {children}
     </header>

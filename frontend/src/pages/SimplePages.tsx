@@ -41,7 +41,7 @@ export function AboutPage() {
   usePageTitle('How it works');
   const { meta } = useAppData();
   const navigate = useNavigate();
-  return <AboutTab meta={meta} onReplayGuide={() => { resetGuide(); navigate('/?tour=1'); }} />;
+  return <AboutTab meta={meta} onReplayGuide={() => { resetGuide(); navigate('/home?tour=1'); }} />;
 }
 
 export function NotFoundPage() {
@@ -49,7 +49,7 @@ export function NotFoundPage() {
   return (
     <Panel title="Page not found">
       <EmptyState icon="🧭" title="We couldn't find that page" message="The link may be old or mistyped.">
-        <Link to="/" className="btn-primary mt-3 inline-flex">Go to the home page</Link>
+        <Link to="/home" className="btn-primary mt-3 inline-flex">Go to the home page</Link>
       </EmptyState>
     </Panel>
   );

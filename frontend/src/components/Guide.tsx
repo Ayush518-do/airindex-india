@@ -110,7 +110,7 @@ export default function Guide({ onClose }: { onClose: () => void }) {
           className="absolute rounded-2xl ring-2 ring-accent transition-all duration-300 motion-reduce:transition-none"
           style={{
             top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2,
-            boxShadow: '0 0 0 9999px rgba(20, 33, 61, 0.38)',
+            boxShadow: '0 0 0 9999px rgba(27, 53, 86, 0.34)',
           }}
         />
       )}
