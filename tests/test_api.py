@@ -328,7 +328,7 @@ def test_openapi_documents_every_route(client):
     for p in ["/health", "/meta", "/meta/cities", "/index/daily", "/index/forecast", "/index/heatmap",
               "/routes/{route}/trend", "/fares/raw", "/predict", "/official/cpi", "/official/compare",
               "/festivals/surge", "/routes/save", "/routes/{browser_id}/alerts",
-              "/routes/{route}/best-time", "/routes/{route_id}"]:
+              "/routes/{route}/best-time", "/routes/{route_id}", "/routes/{route_id}/test-email"]:
         assert p in paths
 
 
@@ -392,3 +392,65 @@ def test_best_time_needs_enough_fares(conn, db_path):
         body = c.get("/routes/DEL-BOM/best-time").json()
     assert body["available"] is False and body["reason"] == "insufficient_history"
     assert "Delhi (DEL)" in body["message"]
+
+
+# --------------------------------------------------------------------------- #
+# Test email (Brevo is always mocked — tests never send real email)
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def brevo(monkeypatch):
+    from backend import main
+    from pipeline import notifier
+    monkeypatch.setenv("BREVO_API_KEY", "test-key")
+    main._last_test_email.clear()
+    calls = []
+    def fake_post(to, subject, html):
+        calls.append({"to": to, "subject": subject, "html": html})
+        return True, None
+    monkeypatch.setattr(notifier, "_post_brevo", fake_post)
+    return calls
+
+
+def test_test_email_sends_real_numbers_marked_as_test(client, brevo):
+    rid = client.post("/routes/save", json=ALERT).json()["id"]
+    r = client.post(f"/routes/{rid}/test-email", headers={"X-Browser-Id": "browser-123"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["sent"] and body["to"] == "me@example.com"
+    assert body["subject"].startswith("Test alert: Delhi → Mumbai")
+    assert len(brevo) == 1 and "TEST EMAIL" in brevo[0]["html"]
+
+
+def test_test_email_is_owner_only(client, brevo):
+    rid = client.post("/routes/save", json=ALERT).json()["id"]
+    _is_error(client.post(f"/routes/{rid}/test-email", headers={"X-Browser-Id": "someone-else"}), 404)
+    assert brevo == []
+
+
+def test_test_email_is_rate_limited(client, brevo):
+    rid = client.post("/routes/save", json=ALERT).json()["id"]
+    mine = {"X-Browser-Id": "browser-123"}
+    assert client.post(f"/routes/{rid}/test-email", headers=mine).status_code == 200
+    _is_error(client.post(f"/routes/{rid}/test-email", headers=mine), 429)
+    assert len(brevo) == 1
+
+
+def test_test_email_needs_brevo_configured(client, brevo, monkeypatch):
+    monkeypatch.delenv("BREVO_API_KEY")
+    rid = client.post("/routes/save", json=ALERT).json()["id"]
+    _is_error(client.post(f"/routes/{rid}/test-email", headers={"X-Browser-Id": "browser-123"}), 503)
+
+
+def test_test_email_reports_brevo_refusal(client, brevo, monkeypatch):
+    from pipeline import notifier
+    monkeypatch.setattr(notifier, "_post_brevo", lambda *a: (False, "Brevo refused it (400): sender not valid"))
+    rid = client.post("/routes/save", json=ALERT).json()["id"]
+    r = client.post(f"/routes/{rid}/test-email", headers={"X-Browser-Id": "browser-123"})
+    _is_error(r, 502)
+    assert "sender not valid" in r.json()["detail"]
+
+
+def test_test_email_never_touches_real_alert_cooldown(client, brevo):
+    rid = client.post("/routes/save", json=ALERT).json()["id"]
+    client.post(f"/routes/{rid}/test-email", headers={"X-Browser-Id": "browser-123"})
+    assert client.get("/routes/saved/browser-123").json()["routes"][0]["last_notified_at"] is None

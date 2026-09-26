@@ -631,6 +631,44 @@ def delete_saved_route(
         raise HTTPException(404, "That alert doesn't exist (it may already have been removed).")
 
 
+_last_test_email: dict[int, datetime] = {}
+TEST_EMAIL_GAP = timedelta(seconds=60)
+
+
+@app.post("/routes/{route_id}/test-email", tags=["alerts"], response_model=S.TestEmailResult)
+def send_test_email(
+    route_id: int,
+    x_browser_id: str = Header(..., alias="X-Browser-Id", min_length=6, max_length=64,
+                               description="The browser_id that created the alert"),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """
+    Send one clearly-labelled TEST email for a saved alert, with today's real
+    numbers, whether or not the route is cheap today — so the whole email path
+    can be tried on demand. Owner-only (same 404 as delete), at most one per
+    alert per minute, and it never affects when real alerts are sent.
+    """
+    row = conn.execute("SELECT * FROM saved_routes WHERE id = ? AND browser_id = ?",
+                       (route_id, x_browser_id)).fetchone()
+    if row is None:
+        raise HTTPException(404, "That alert doesn't exist (it may already have been removed).")
+    if not notifier.brevo_configured():
+        raise HTTPException(503, "Email isn't set up on this server yet (BREVO_API_KEY is missing in .env).")
+    now = timeutil.now()
+    last = _last_test_email.get(route_id)
+    if last and now - last < TEST_EMAIL_GAP:
+        wait = int((TEST_EMAIL_GAP - (now - last)).total_seconds()) + 1
+        raise HTTPException(429, f"A test email was just sent. You can send another in {wait} seconds.")
+    route = f"{row['origin']}-{row['destination']}"
+    out = notifier.send_test(conn, row["email"], route)
+    if out["reason"] == "no_prices":
+        raise HTTPException(409, f"We don't have today's prices for {route_label(route)} yet, so there's nothing to put in the email.")
+    if not out["sent"]:
+        raise HTTPException(502, f"The email couldn't be sent: {out['detail']}")
+    _last_test_email[route_id] = now
+    return out
+
+
 @app.get("/routes/{browser_id}/alerts", tags=["alerts"], response_model=S.RouteAlerts)
 def route_alerts(browser_id: str, conn: sqlite3.Connection = Depends(get_db)):
     """

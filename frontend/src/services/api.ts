@@ -271,6 +271,10 @@ export const getSavedRoutes = (browserId: string) =>
 /** Only deletes if the alert belongs to this browser (checked server-side). */
 export const deleteSavedRoute = (browserId: string, id: number) =>
   api.delete(`/routes/${id}`, { headers: { 'X-Browser-Id': browserId } }).then(() => undefined);
+/** One clearly-labelled test email with today's real numbers (owner-only, max 1/min). */
+export const sendTestEmail = (browserId: string, id: number) =>
+  api.post<{ sent: boolean; to: string; subject: string; is_cheap: boolean; pct_below: number | null }>(
+    `/routes/${id}/test-email`, null, { headers: { 'X-Browser-Id': browserId } }).then(r => r.data);
 export const getBestTime = (route: string) => api.get<BestTime>(`/routes/${route}/best-time`).then(r => r.data);
 export const getFestivalCalendar = () =>
   api.get<{ festivals: Festival[] }>('/festivals/calendar').then(r => r.data);

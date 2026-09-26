@@ -354,3 +354,11 @@ class ErrorResponse(BaseModel):
     error: str
     detail: str
     path: str | None = None
+
+
+class TestEmailResult(BaseModel):
+    sent: bool
+    to: str
+    subject: str
+    is_cheap: bool
+    pct_below: float | None = None

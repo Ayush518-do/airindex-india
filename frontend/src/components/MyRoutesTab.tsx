@@ -6,7 +6,7 @@ import { Panel, EmptyState, ErrorState, InfoTip, Skeleton, inr, fmtLongDate } fr
 import { GLOSSARY } from '../lib/glossary';
 import { cityName, routeLabel } from '../lib/cities';
 import {
-  saveRoute, getSavedRoutes, deleteSavedRoute, getRouteAlerts, getPrediction, friendlyError,
+  saveRoute, getSavedRoutes, deleteSavedRoute, sendTestEmail, getRouteAlerts, getPrediction, friendlyError,
   type SavedRoute, type RouteAlerts, type Prediction,
 } from '../services/api';
 
@@ -92,6 +92,16 @@ export default function MyRoutesTab({ browserId, routes, alerts, onAlertsChange 
   };
 
   const [removing, setRemoving] = useState<number | null>(null);
+  const [testing, setTesting] = useState<number | null>(null);
+  const test = async (r: SavedRoute) => {
+    setTesting(r.id); setMsg(null);
+    try {
+      const out = await sendTestEmail(browserId, r.id);
+      setMsg({ tone: 'ok', text: `Test email sent to ${out.to}. It should arrive within a minute — check spam if you don't see it.` });
+    } catch (err) {
+      setMsg({ tone: 'err', text: friendlyError(err) });
+    } finally { setTesting(null); }
+  };
   const remove = async (r: SavedRoute) => {
     setRemoving(r.id);
     try {
@@ -216,6 +226,11 @@ export default function MyRoutesTab({ browserId, routes, alerts, onAlertsChange 
                           )}
                           {a && a.pct_below_baseline == null && <span className="text-ink-3">Watching — needs a few more days of prices</span>}
                         </p>
+                        <button type="button" onClick={() => test(r)} disabled={testing === r.id}
+                          className="btn-ghost !px-3 !py-1.5 text-[13px]"
+                          aria-label={`Send a test email for ${label}`}>
+                          {testing === r.id ? 'Sending…' : 'Send test email'}
+                        </button>
                         <button type="button" onClick={() => remove(r)} disabled={removing === r.id}
                           className="btn-ghost !px-3 !py-1.5 text-[13px]"
                           aria-label={`Delete alert for ${label}`}>
