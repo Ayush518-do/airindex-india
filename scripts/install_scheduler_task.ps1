@@ -30,6 +30,8 @@ param(
 $ErrorActionPreference = "Stop"
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $Pythonw = Join-Path $Repo ".venv\Scripts\pythonw.exe"
+# Full account name (e.g. "PC-NAME\ayush" or "AzureAD\ayush"); a bare username is rejected on some machines.
+$Me = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 
 if ($Uninstall) {
     if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
@@ -49,7 +51,7 @@ if (-not (Test-Path $Pythonw)) {
 $action = New-ScheduledTaskAction -Execute $Pythonw -Argument "-m scraper.scheduler" -WorkingDirectory $Repo
 
 $triggers = @(
-    (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME),
+    (New-ScheduledTaskTrigger -AtLogOn -User $Me),
     (New-ScheduledTaskTrigger -Daily -At "05:55")
 )
 
@@ -62,7 +64,7 @@ $settings = New-ScheduledTaskSettingsSet `
     -RestartInterval (New-TimeSpan -Minutes 5) `
     -MultipleInstances IgnoreNew
 
-$principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -LogonType Interactive -RunLevel Limited
+$principal = New-ScheduledTaskPrincipal -UserId $Me -LogonType Interactive -RunLevel Limited
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $triggers `
     -Settings $settings -Principal $principal -Force `
