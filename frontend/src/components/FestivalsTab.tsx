@@ -9,6 +9,7 @@ import {
   tooltipStyle, inr, fmtDate, axisTick, axisLabel,
 } from './ui';
 import { GLOSSARY } from '../lib/glossary';
+import { useNarrow } from '../lib/motion';
 import { routeLabel, routeShort } from '../lib/cities';
 import { friendlyError, getFestivalSurge, type FestivalSurge, type SurgeRow } from '../services/api';
 
@@ -40,16 +41,17 @@ function comparedOn(basis?: string | null) {
 export default function FestivalsTab({ routes }: { routes: string[] }) {
   const [data, setData] = useState<FestivalSurge | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const narrow = useNarrow();
 
   const load = () => { setError(null); getFestivalSurge().then(setData).catch(e => setError(friendlyError(e))); };
   useEffect(load, []);
 
   const present = useMemo(() => Array.from(new Set((data?.surge ?? []).map(s => s.festival))), [data]);
   const rows = useMemo(() => routes.map(r => {
-    const row: Record<string, string | number> = { route: r, tick: routeShort(r) };
+    const row: Record<string, string | number> = { route: r, tick: narrow ? r.replace('-', '→') : routeShort(r) };
     for (const s of data?.surge ?? []) if (s.route === r) row[s.festival] = s.surge_pct;
     return row;
-  }), [data, routes]);
+  }), [data, routes, narrow]);
   const byFestival = useMemo(() => {
     const m = new Map<string, SurgeRow[]>();
     for (const s of data?.surge ?? []) m.set(s.festival, [...(m.get(s.festival) ?? []), s]);
@@ -84,10 +86,10 @@ export default function FestivalsTab({ routes }: { routes: string[] }) {
             <div style={{ width: '100%', height: 340 }} role="img"
               aria-label={`Festival price change by route. ${data.surge.map(s => `${s.festival}, ${routeLabel(s.route)}: ${s.surge_pct > 0 ? '+' : ''}${s.surge_pct}%`).join('; ')}.`}>
               <ResponsiveContainer>
-                <BarChart data={rows} margin={{ top: 8, right: 16, bottom: 36, left: 16 }} barCategoryGap="22%" barGap={2}>
+                <BarChart data={rows} margin={{ top: 8, right: narrow ? 4 : 16, bottom: 36, left: narrow ? 0 : 16 }} barCategoryGap="22%" barGap={2}>
                   <CartesianGrid stroke={GRID} vertical={false} />
                   <XAxis dataKey="tick" stroke={GRID} tick={{ ...axisTick, fontSize: 11 }} tickLine={false} interval={0}
-                    angle={-18} textAnchor="end" height={48} label={axisLabel('Route', 0)} />
+                    angle={narrow ? -40 : -18} textAnchor="end" height={narrow ? 56 : 48} label={axisLabel('Route', 0)} />
                   <YAxis stroke={GRID} width={56} tick={axisTick} tickLine={false} axisLine={false}
                     tickFormatter={v => `${v > 0 ? '+' : ''}${v}%`} label={axisLabel('Price change', -90)} />
                   <ReferenceLine y={0} stroke={INK_3} strokeOpacity={0.5} />

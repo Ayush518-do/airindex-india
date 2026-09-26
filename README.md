@@ -1,116 +1,176 @@
 # AIRINDEX INDIA — Real-time Airfare Price Index (APIx)
 
-Prototype for **Smart India Hackathon 2026 · MoSPI problem statement**: a daily airfare
-price index for Indian domestic routes built from web-scraped airline/OTA fares, with an
-open API for NSO/RBI-style consumers and consumer-facing features (fare elasticity,
-festival surge, fare prediction, low-fare alerts).
+**Smart India Hackathon 2026 · MoSPI problem statement 26056.**
 
-> **Not an official statistic.** This is a hackathon prototype. Seeded demo history and
-> illustrative reference values are disclosed everywhere they appear (see § Honesty notes).
+AIRINDEX INDIA measures what domestic flights in India cost, **every day**. Each morning it
+looks up nonstop economy fares on public booking sites for six busy routes, and turns them
+into one number: the **Airfare Price Index (APIx)**, which is 100 on our first day of
+checking. It sits on top of the government's official monthly airfare index (MoSPI CPI,
+2014 onwards) and adds:
+
+* **for travellers:** the cheapest route today, the best time to book each route, how much
+  festivals push prices up, and free email alerts when a route gets cheaper than usual;
+* **for statisticians (NSO / RBI):** an open, documented API (`/docs`) with the daily index,
+  the underlying cleaned fares, and a side-by-side comparison with the official CPI series.
+
+> **Not an official statistic.** This is a hackathon project. Where data is thin, the app
+> says so instead of filling the gap (see [Honesty notes](#honesty-notes)).
 
 ---
 
-## What it does
+## Architecture
+
+```mermaid
+flowchart LR
+    subgraph Sources
+        EMT[EaseMyTrip<br/>search pages]
+        SJ[SpiceJet<br/>search pages]
+        MOSPI[MoSPI eSankhyiki API<br/>CPI airfare item]
+    end
+
+    subgraph Collect["Collect (scraper/)"]
+        SCHED[APScheduler daemon<br/>scraper/scheduler.py]
+        PW[Playwright scrapers<br/>robots.txt gate + rate limiter]
+        RAW[(data/raw/*.json<br/>cached snapshots)]
+    end
+
+    subgraph Pipeline["Process (pipeline/)"]
+        CLEAN[clean.py<br/>outliers, basket flags]
+        IDX[index.py<br/>APIx]
+        MODEL[fare_model.py<br/>forecast, festivals]
+        CPI[mospi.py<br/>official_compare.py]
+        NOTIFY[notifier.py]
+        DB[(SQLite<br/>data/processed/airindex.db)]
+    end
+
+    API[FastAPI<br/>backend/main.py<br/>/docs]
+    UI[React app<br/>frontend/]
+    BREVO[Brevo email]
+
+    SCHED --> PW
+    EMT --> PW
+    SJ --> PW
+    PW --> RAW --> CLEAN --> DB
+    DB --> IDX --> DB
+    DB --> MODEL --> DB
+    MOSPI --> CPI --> DB
+    DB --> NOTIFY --> BREVO
+    DB --> API --> UI
+```
+
+The app reads only from the SQLite database, which is built from the JSON snapshots in
+`data/raw/`. **Nothing depends on a live scrape at request time**, so a site blocking us
+or a failed run just leaves yesterday's data in place.
 
 | Layer | Where | What |
 |---|---|---|
-| Scrape | `scraper/` | Playwright scrapers, one file per source, robots.txt-checked, rate-limited, every run cached as JSON in `data/raw/` |
-| Clean | `pipeline/clean.py` | raw JSON → `fares` table (SQLite), outlier + basket flags |
-| Index | `pipeline/index.py` | daily **APIx**: route × advance-purchase basket, DGCA-share weighted, base day = 100 |
-| Forecast | `pipeline/trend_forecast.py` | OLS line through the last 10 days, 3–7 days ahead, 95 % residual band |
-| Predict | `pipeline/fare_model.py` | GradientBoosting fare model; predicted-vs-actual overlay and `/predict` |
-| Festivals | `pipeline/festivals.py` | hard-coded festival calendar → festival-vs-normal surge per route |
-| Alerts | `pipeline/notifier.py` | saved routes > 15 % below 14-day baseline → email via Brevo, 24 h cooldown |
-| Back-test | `pipeline/backtest.py` | scraped levels vs a public reference table (`data/reference/`) |
+| Scrape | `scraper/` | Playwright scrapers, one file per source; robots.txt checked, rate-limited; every run cached as JSON in `data/raw/` |
+| Schedule | `scraper/scheduler.py` | APScheduler with a persistent job store, retries and missed-run catch-up |
+| Clean | `pipeline/clean.py` | raw JSON → `fares` table, outlier and basket flags |
+| Index | `pipeline/index.py` | daily **APIx**, route × booking-window basket, traffic-weighted, base day = 100 |
+| Official data | `pipeline/mospi.py`, `pipeline/official_compare.py` | MoSPI CPI airfare series; link, overlap stats and seasonal profile vs APIx |
+| Forecast | `pipeline/trend_forecast.py` | straight-line trend through the last 10 days, 3–7 days ahead, with a 95 % band |
+| Predict | `pipeline/fare_model.py` | gradient-boosting fare model behind `/predict` |
+| Festivals | `pipeline/festivals.py` | festival calendar → festival vs ordinary-day price jump per route |
+| Alerts | `pipeline/notifier.py` | saved routes > 15 % below their 14-day usual price → email via Brevo, 24 h cooldown |
 | API | `backend/main.py` | FastAPI + Swagger (`/docs`) |
-| UI | `frontend/` | React + Recharts dashboard, React Bits animations |
+| UI | `frontend/` | React + TypeScript + Tailwind + Recharts, six pages |
 
-## Quick start
+---
 
-```bash
-# 1. Python
+## Setup
+
+Needs **Python 3.11+** and **Node 18+**. Commands are for Windows (PowerShell); on
+macOS/Linux use `source .venv/bin/activate` and forward slashes.
+
+```powershell
+# 1. Python environment
 python -m venv .venv
-.venv/Scripts/activate            # Windows   (source .venv/bin/activate on macOS/Linux)
-pip install -r backend/requirements.txt
+.venv\Scripts\activate
+pip install -r backend\requirements.txt
 
-# 2. Download the browser the scrapers drive (REQUIRED — pip does not do this)
+# 2. The browser the scrapers drive — REQUIRED, pip does not install it
 python -m playwright install chromium
 
-# 3. Build the data store from the cached snapshots that ship in data/raw/,
-#    then fetch the official MoSPI CPI series (no API key needed)
+# 3. Secrets: copy the template and fill in your Brevo key
+copy .env.example .env
+#    then edit .env:   BREVO_API_KEY=xkeysib-...
+
+# 4. Build the database from the snapshots in data/raw/, then fetch official CPI data
 python -m pipeline.run_all --rebuild
 python -m pipeline.mospi
 
-# 4. API  (http://localhost:8000/docs)
-python -m uvicorn backend.main:app --reload --reload-dir backend --reload-dir pipeline --port 8000
+# 5. Frontend dependencies
+cd frontend; npm install; cd ..
 
-# 5. Frontend  (http://localhost:5173)
-cd frontend && npm install && npm run dev
+# 6. Keep collecting prices every day (run once; see "Scheduler" below)
+powershell -ExecutionPolicy Bypass -File scripts\install_scheduler_task.ps1
 ```
 
-> **Playwright browser missing?** If a scrape fails with *"Executable doesn't exist"*
-> or *"Looks like Playwright was just installed or updated"*, run
-> `python -m playwright install chromium` again. Playwright keeps its browsers in a
-> per-user cache (`%USERPROFILE%\AppData\Local\ms-playwright` on Windows) tied to the
-> package version, so any Playwright upgrade — including one pulled in by
-> `pip install -r backend/requirements.txt` — needs the matching browser re-downloaded.
-> The API and dashboard don't need it; only scraping does.
+> **Playwright browser missing?** If a scrape fails with *"Executable doesn't exist"* or
+> *"Looks like Playwright was just installed or updated"*, run
+> `python -m playwright install chromium` again. Playwright keeps its browsers in a per-user
+> cache (`%USERPROFILE%\AppData\Local\ms-playwright`) tied to the package version, so any
+> Playwright upgrade — including one pulled in by `pip install -r backend\requirements.txt` —
+> needs the matching browser re-downloaded. Only scraping needs it; the API and the website
+> don't.
 
-The app reads only from `data/processed/airindex.db`, which is built from the JSON snapshots
-in `data/raw/`. **It never depends on a live scrape**, so the demo works offline and cannot
-be broken by a site blocking us.
+### `.env`
 
-### Official CPI (MoSPI)
+All secrets live in `.env` (git-ignored) and are read with `python-dotenv`. Nothing is
+hard-coded. See `.env.example`:
 
-```bash
-python -m pipeline.mospi                 # refresh 2014..now (no API key needed)
-python -m pipeline.mospi --years 2025 2026
+| Variable | Needed? | What |
+|---|---|---|
+| `BREVO_API_KEY` | for emails | Brevo transactional email key. Without it, alerts are still evaluated and logged, just not sent. |
+| `ALERT_FROM_EMAIL`, `ALERT_FROM_NAME` | optional | sender identity for alert emails |
+| `CORS_ORIGINS` | optional | comma-separated origins allowed to call the API |
+| `DEMO_MODE` | optional | `0` (default) or `1` — see [Demo mode](#demo-mode) |
+
+---
+
+## Running it
+
+```powershell
+# API  → http://localhost:8000   (Swagger: http://localhost:8000/docs)
+.venv\Scripts\python -m uvicorn backend.main:app --reload --reload-dir backend --reload-dir pipeline --port 8000
+
+# Website → http://localhost:5173
+cd frontend; npm run dev
 ```
 
-Pulls the Consumer Price Index item **"Air Fare (normal): Economy Class(adult)"**
-(`6.1.03.3.2.07.0`, base year 2012) and its parent sub-group *Transport and
-Communication*, from `api.mospi.gov.in`. The item is an economy-class airfare
-index, which is what APIx measures too, so the two are directly comparable.
+Or with Docker (API + website; the scheduler is opt-in, see below):
 
-Codes are resolved **by name at runtime**, never hardcoded — if MoSPI renames or
-withdraws the item the fetch fails loudly rather than silently binding to the
-wrong series.
-
-Two limits worth knowing: only base year 2012 carries item-level data, and the
-item has no sector breakdown upstream (all three sector codes return identical
-values), so it is stored once as `sector='All'`. The sub-group does have real
-Rural/Urban/Combined splits.
-
-### Demo mode
-
-The live index only grows in wall-clock time, so a fresh install has very little
-history. For presentations:
-
-```bash
-python scripts/build_demo_db.py          # writes data/processed/airindex_demo.db
-DEMO_MODE=1 python -m uvicorn backend.main:app --port 8000
-# or: DEMO_MODE=1 docker compose up -d backend
+```powershell
+docker compose up -d backend frontend
 ```
 
-Demo data lives in a **separate database file**, never the live one — isolation
-rather than filtering, so no missed `WHERE` clause can leak seeded fares into
-real output. The UI shows a "DEMO DATA — NOT REAL FARES" badge whenever it is
-on, and the API reports `data_mode: "demo"` at `/meta`.
+The website has six pages, each with its own URL (deep links and the back button work):
 
-### Refreshing data
+| Page | URL | What's on it |
+|---|---|---|
+| Home | `/` | today's index, a plain-English summary, and quick answers: cheapest route today, best time to book, next festival price jump |
+| Routes | `/routes?from=DEL&to=BOM` | city search, best time to book, prices by booking time, the price map, and the individual flights found |
+| Festivals | `/festivals` | how much fares jump around each festival, per route |
+| Official data | `/official` | MoSPI's monthly airfare index since 2014, and how APIx lines up with it |
+| My alerts | `/alerts` | from / to / email form; your saved alerts with delete |
+| How it works | `/about` | method, sources and a glossary in plain English |
 
-```bash
-python -m scraper.run                          # scrape all sources, all routes, standard offsets
+### Refreshing data by hand
+
+```powershell
+python -m scraper.run                                   # all sources, all routes, standard offsets
 python -m scraper.run --source easemytrip --routes DEL-BOM --offsets 2,10   # quick test
-python -m scraper.run --dates 2026-11-07,2026-10-28   # explicit travel dates (festival vs control)
-python -m pipeline.run_all                     # clean → index → model → festivals → alerts
+python -m scraper.run --dates 2026-11-07,2026-10-28     # explicit travel dates (festival vs control)
+python -m pipeline.run_all                              # clean → index → model → festivals → alerts
+python -m pipeline.mospi --years 2025 2026              # refresh official CPI for some years
 ```
 
-### Keeping the scheduler running
+### Scheduler
 
-The index only gains history in wall-clock time, so collection has to keep
-happening on its own. `scraper.scheduler` is an APScheduler daemon with a
-persistent job store (`data/processed/jobs.db`):
+The index only gains history in wall-clock time, so collection has to happen on its own.
+`scraper.scheduler` is an APScheduler daemon with a persistent job store
+(`data/processed/jobs.db`):
 
 | Job | When (IST) |
 |---|---|
@@ -119,6 +179,17 @@ persistent job store (`data/processed/jobs.db`):
 | low-fare alerts | daily 09:00 |
 | official CPI refresh | 15th of each month, 07:00 |
 
+**Start it automatically on Windows** (run once, from the repo root):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\install_scheduler_task.ps1
+```
+
+That registers a Task Scheduler entry that starts the scheduler at logon and again at
+05:55 daily. It overrides three Windows defaults that would otherwise quietly stop
+collection on a laptop: tasks not starting on battery, tasks being stopped when
+unplugged, and a 72-hour execution limit. Remove it with `-Uninstall`.
+
 ```powershell
 .venv\Scripts\python -m scraper.scheduler            # run in the foreground (Ctrl-C to stop)
 .venv\Scripts\python -m scraper.scheduler --once     # one full cycle now, then exit
@@ -126,62 +197,55 @@ persistent job store (`data/processed/jobs.db`):
 .venv\Scripts\python -m scraper.scheduler --health   # per-source health
 ```
 
-**Start it automatically on Windows** (run once, from the repo root):
+Missed days: if the laptop is closed at 06:00, that day's scrape still runs whenever the
+machine is on later that day (20-hour misfire grace, coalesced to one run). Only a day
+spent entirely offline is skipped — the index can't observe a day it wasn't running for.
+A lock file stops two schedulers running at once, so starting one by hand while the task
+is up is a harmless no-op.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install_scheduler_task.ps1
-```
-
-That registers a Task Scheduler entry that starts the scheduler at logon and
-again at 05:55 daily. It overrides three Windows defaults that would otherwise
-quietly stop collection on a laptop: tasks not starting on battery, tasks being
-stopped when unplugged, and a 72-hour execution limit. Remove it with
-`-Uninstall`.
-
-How missed days are handled: if the laptop is closed at 06:00, that day's
-scrape still runs whenever the machine is on later that day (a 20-hour misfire
-grace, coalesced to one run). Only a day spent entirely offline is skipped —
-the index can't observe a day it wasn't running for. A lock file prevents two
-schedulers from running at once, so starting one by hand while the task is up
-is a harmless no-op.
-
-Docker alternative (only while Docker Desktop is running — pick **one** of the
-two, never both, or every site gets scraped twice):
-
-```bash
-docker compose --profile scheduler up -d scheduler
-```
+Docker alternative (only while Docker Desktop is running — pick **one** of the two, never
+both, or every site gets scraped twice): `docker compose --profile scheduler up -d scheduler`.
 
 Structured JSON logs go to `data/logs/scheduler.jsonl` (rotated at 5 MB × 5).
-`GET /health` reports scrape age and per-source status, and marks a source
-`stale` if it hasn't succeeded in 48 hours.
+`GET /health` reports scrape age and per-source status, and marks a source `stale` if it
+hasn't succeeded in 48 hours.
 
 ### Tests
 
-```bash
-.venv/Scripts/python -m pytest -q              # full suite
-.venv/Scripts/python -m pytest -q -m "not slow"   # skip the model-training test
+```powershell
+.venv\Scripts\python -m pytest -q                  # full suite
+.venv\Scripts\python -m pytest -q -m "not slow"    # skip the model-training test
+cd frontend; npx tsc --noEmit                       # type-check the website
 ```
 
-Every test runs against a temporary SQLite file — the live and demo databases
-are never touched — and a guard fails any test that opens a network
-connection. MoSPI tests replay recorded responses from `tests/fixtures/mospi/`;
-Brevo is mocked.
-
-### Alerts (Brevo)
-
-```bash
-cp .env.example .env
-# edit .env:  BREVO_API_KEY=xkeysib-...
-```
-
-`BREVO_API_KEY` is read from the environment (`python-dotenv` loads `.env`); it is never
-hard-coded and `.env` is git-ignored. Without a key the notifier evaluates alerts and logs
-what it *would* send. `ALERT_FROM_EMAIL` / `ALERT_FROM_NAME` are optional.
+Every test runs against a temporary SQLite file (the live and demo databases are never
+touched), and a guard fails any test that opens a network connection. MoSPI tests replay
+recorded responses from `tests/fixtures/mospi/`; Brevo is mocked.
 
 ---
 
-## Methodology
+## Demo mode
+
+A fresh install has very little history (real days accrue one per day). For presentations:
+
+```powershell
+python scripts\build_demo_db.py                 # writes data/processed/airindex_demo.db
+$env:DEMO_MODE=1; .venv\Scripts\python -m uvicorn backend.main:app --port 8000
+# or set DEMO_MODE=1 in .env and restart the API / backend container
+```
+
+* `DEMO_MODE` is **off by default**.
+* Demo data lives in a **separate database file** (`airindex_demo.db`) built from the seeded
+  fixtures in `tests/fixtures/`, plus a copy of the real official CPI table. The live
+  database is never written to. This is isolation, not filtering, so no missed `WHERE`
+  clause can leak seeded fares into real output. The API refuses to start if the mode and
+  the database file don't match.
+* The website shows a **"Demo data — not real fares"** badge on every page, at every screen
+  size, and `/meta` reports `data_mode: "demo"`.
+
+---
+
+## How APIx is calculated
 
 ### Basket
 
@@ -189,17 +253,16 @@ Six routes, weighted by approximate DGCA domestic traffic share (normalised to 1
 
 | Route | Weight | Route | Weight |
 |---|---|---|---|
-| DEL-BOM | 0.26 | DEL-CCU | 0.13 |
-| DEL-BLR | 0.20 | MAA-DEL | 0.12 |
-| BOM-BLR | 0.18 | BLR-HYD | 0.11 |
+| Delhi → Mumbai (DEL-BOM) | 0.26 | Delhi → Kolkata (DEL-CCU) | 0.13 |
+| Delhi → Bengaluru (DEL-BLR) | 0.20 | Chennai → Delhi (MAA-DEL) | 0.12 |
+| Mumbai → Bengaluru (BOM-BLR) | 0.18 | Bengaluru → Hyderabad (BLR-HYD) | 0.11 |
 
-Each route is observed at a **fixed advance-purchase profile** — one departure per window,
-scraped exactly 2 / 5 / 10 / 21 / 45 days ahead (windows `0-3`, `4-7`, `8-14`, `15-30`,
-`31-60`). This mirrors DGCA's Tariff Monitoring Unit, which checks fares 30/15/7/3/2/1
-days ahead. Only **nonstop economy** fares go into the index (comparable product);
-connections, fare families and outliers are kept in the table but flagged.
+Each route is observed at a **fixed booking profile**: flights exactly 2, 5, 10, 21 and 45
+days ahead, grouped into windows `0-3`, `4-7`, `8-14`, `15-30`, `31-60` days. This mirrors
+DGCA's Tariff Monitoring Unit, which checks fares 30/15/7/3/2/1 days ahead. Only
+**nonstop economy** fares enter the index, so like is always compared with like.
 
-### Index
+### Formula
 
 ```
 cell price relative   rel[D][r][w] = mean_fare[D][r][w] / mean_fare[BASE][r][w]
@@ -207,161 +270,166 @@ route relative        rel[D][r]    = mean over windows w observed on D
 APIx[D]               = 100 × Σ_r W_r · rel[D][r]  /  Σ_r W_r        (routes observed on D)
 ```
 
-Laspeyres-style fixed basket, base = first captured day. `coverage` = share of basket
-weight actually observed that day; routes/windows missing on a day are renormalised out
-rather than imputed.
+A Laspeyres-style fixed basket with base = first captured day. `coverage` is the share of
+basket weight actually observed that day; routes or windows missing on a day are
+renormalised out, never imputed.
 
 ### Cleaning
 
-* Sold-out / placeholder rows (no total, < ₹500, > ₹60 000) dropped.
-* Outliers: within each (route, travel date, stops) group, fares above 3 × the group
-  median are flagged `is_outlier = 1` (kept in `/fares/raw`, excluded from index + model).
-* `in_basket = 1` only for records scraped at the standard offsets; extra festival/control
+* Sold-out / placeholder rows (no total, < ₹500, > ₹60,000) are dropped.
+* Outliers: within each (route, travel date, stops) group, fares above 3 × the group median
+  are flagged `is_outlier = 1`. They stay in `/fares/raw` but are excluded from the index
+  and the model.
+* `in_basket = 1` only for fares scraped at the standard offsets; extra festival/control
   scrapes feed the model and festival analysis but not the index.
-* `base_fare` / `taxes` are `null` where the source card shows only the total.
 
-### Forecast
+### Best time to book
 
-Ordinary least squares through the last 10 index values, extrapolated 3–7 days, anchored on
-the last actual value, band = 1.96 × residual SE × √h. Deliberately simple: with a few weeks
-of daily data a linear trend with a visible band is the most defensible thing to show.
+For each route, `GET /routes/{route}/best-time` averages fares per booking window across
+**every day** of prices we hold (weighted by the number of fares), keeps windows with at
+least 20 fares, and names the cheapest: *"Cheapest to book about 10 days before travel
+(avg ₹6,953)"*. With fewer than two such windows it says there isn't enough data yet.
 
-### Fare model
+### Official comparison
 
-`GradientBoostingRegressor` on `log(total_fare)` with features route, carrier,
-days_to_departure, day_of_week, is_weekend, is_festival_season, advance_purchase_window.
-Retrained every pipeline cycle; hold-out MAE / MAPE / R² are exposed at `/model/info` and
-shown in the UI. Training rows include seeded history when present (counts reported).
+APIx is rebased onto the CPI level at a link month. Correlation, MAE and MAPE need at least
+3 overlapping months; until then `/official/compare` returns `pending_overlap`, and the page
+compares today's move with the CPI's usual pattern for this month (mean month-over-month
+change per calendar month, 2014 onwards).
 
-### Festival surge
+### Other models
 
-Fares are tagged by **travel date** against `pipeline/festivals.py`'s calendar. For each
-(festival, route), the festival mean is compared with the non-festival mean **for the same
-advance-purchase window mix** (`basis = "same window"`); if no non-festival fare exists in
-that window it falls back to the route's overall non-festival mean and says so
-(`basis = "route overall"`). Run `python -m scraper.run --dates <festival>,<control>` to
-collect matched pairs — the shipped snapshots include Diwali (7 Nov) vs 28 Oct / 18 Nov.
-
-### Alerts
-
-`today = mean basket fare on the latest scrape day`, `baseline = mean over the previous 14
-scrape days`; cheap if `today < 0.85 × baseline`. One email per route per 24 h
-(`last_notified_at`). Saved routes are keyed by a random `browser_id` kept in
-`localStorage` — no accounts.
+* **Forecast:** ordinary least squares through the last 10 index values, extrapolated 3–7
+  days, band = 1.96 × residual SE × √h. Needs 10 real days.
+* **Fare model:** `GradientBoostingRegressor` on `log(total_fare)` with route, carrier, days
+  to departure, day of week, weekend, festival season and booking window. Retrained every
+  cycle; hold-out MAE / MAPE / R² at `/model/info`.
+* **Festival jump:** fares are tagged by travel date against `pipeline/festivals.py`; for each
+  (festival, route) the festival mean is compared with the ordinary-day mean for the same
+  booking-window mix (`basis = "same window"`), falling back to the route's overall mean
+  and saying so (`basis = "route overall"`).
+* **Alerts:** `today` = mean basket fare on the latest scrape day, `usual` = mean over the
+  previous 14 scrape days; cheap if `today < 0.85 × usual`. One email per route per 24 h.
+  Alerts are keyed by a random `browser_id` in `localStorage` — no accounts — and can only
+  be deleted by the same browser (`DELETE /routes/{id}` with an `X-Browser-Id` header).
 
 ---
+
+## Data sources
+
+| Source | What | How |
+|---|---|---|
+| **MoSPI eSankhyiki** (`api.mospi.gov.in`) | CPI item *"Air Fare (normal): Economy Class(adult)"* (`6.1.03.3.2.07.0`, base 2012), monthly, 2014-01 onwards; plus its parent sub-group *Transport and Communication* (Rural / Urban / Combined) | Public API, no key. Codes are resolved **by name at runtime**, so a renamed or withdrawn item fails loudly instead of binding to the wrong series. Raw responses cached in `data/raw/mospi/`. |
+| **EaseMyTrip** | nonstop economy fares, six routes, five booking offsets | Playwright, rendered search pages |
+| **SpiceJet** | same | Playwright, rendered search pages |
+
+Known upstream limits: only base year 2012 carries item-level CPI data; the airfare item
+has no sector split (all sector codes return identical values), so it is stored once as
+`sector='All'`; March–May 2020 are missing upstream (COVID), and the jump from 70.0 to
+203.9 in 2020 is in MoSPI's own data.
 
 ## Ethical scraping
 
 * **robots.txt is checked before every navigation** (`urllib.robotparser`, cached per host).
   A disallowed URL is skipped and recorded as `robots_disallowed`; it is never fetched.
-  Sources whose robots.txt disallows their search pages (Google Flights, Kayak, Ixigo,
-  Cleartrip, Goibibo) were **not** used. Current sources:
-  * **EaseMyTrip** — `User-Agent: * / Allow: *` on both `www.` and `flight.` hosts.
-  * **SpiceJet** — `/search` is allowed; `/api/v1`, `/public/`, `/externalBooking` are not
-    and are never called directly.
-* **Rate-limited**: ≥ 4–5 s (+ jitter) between page loads per source, one browser
-  context, one query at a time. A full run is 30 page loads ≈ 3 minutes.
-* **Rendered DOM only** — we read what a user sees; we do not call the sites' internal
-  JSON APIs ourselves.
-* **Cached-snapshot fallback** — every run is written to `data/raw/<source>_<ts>.json`
-  with per-query status (`ok / empty / blocked / robots_disallowed / error`). The app
-  serves the latest cached snapshot; a blocked run just leaves the previous one in place.
-* Identifies itself with a normal desktop Chrome user agent; no CAPTCHA solving, no
-  proxy rotation, no login.
+  Sites whose robots.txt disallows their search pages (Google Flights, Kayak, Ixigo,
+  Cleartrip, Goibibo) are **not** used. EaseMyTrip allows all agents; on SpiceJet, `/search`
+  is allowed while `/api/v1`, `/public/` and `/externalBooking` are not, and are never called.
+* **Rate-limited:** at least 4–5 s (plus jitter) between page loads per source, one browser
+  context, one query at a time. A full run is about 30 page loads, roughly 3 minutes.
+* **Rendered pages only:** we read what any visitor sees; we don't call the sites' internal
+  JSON APIs.
+* **Cached snapshots:** every run is written to `data/raw/<source>_<timestamp>.json` with a
+  per-query status (`ok / empty / blocked / robots_disallowed / error`). A blocked run just
+  leaves the previous data in place.
+* No CAPTCHA solving, no proxy rotation, no login, no personal data.
 
 ## Honesty notes
 
-* **No synthetic data in live mode.** The live store contains only real scraped fares.
-  There is no fake-data fallback anywhere in the API: an endpoint with nothing to show
-  returns `{"available": false, "reason": ...}` and the UI renders an honest empty state.
-  Seeded fixtures exist only under `tests/fixtures/` and are reachable solely through
-  `DEMO_MODE=1`, which reads a **separate database file** and badges every page.
-* **The index is young.** Real history accumulates only in wall-clock time — a forecast
-  needs 10 scrape days, so a fresh install correctly reports `insufficient_history`
-  rather than drawing a trend line through one point.
-* **Official comparison has no overlap yet.** MoSPI's CPI airfare series ends 2025-12
-  and scraping began 2026-09, so correlation is mathematically undefined today.
-  `/official/compare` reports `pending_overlap` with the month counts, and the scale
-  link is explicitly labelled "no overlapping month yet — anchored to the latest
-  official month". The CPI seasonal profile (12 years of month-over-month moves) is a
-  real comparison that *can* be made now, and is shown instead.
-* **Superseded reference table.** `data/reference/dgca_reference_fares.json` held
-  illustrative placeholder values; `/official/compare` replaces it with real MoSPI data.
-  The old `/backtest/dgca` route remains only until the UI moves over.
-* Only the nonstop economy product is indexed; `base_fare`/`taxes` are unavailable from
-  the current sources' result cards.
+* **No synthetic data in live mode.** The live database contains only real scraped fares.
+  There is no fake-data fallback: an endpoint with nothing to show returns
+  `{"available": false, "reason": ..., "message": ...}` with a 200, and the website shows a
+  friendly empty state with that message. Seeded fixtures exist only under `tests/fixtures/`
+  and are reachable only through `DEMO_MODE=1`.
+* **The index is young.** Real history accumulates one day at a time; the forecast needs 10
+  days and correctly reports `insufficient_history` before that.
+* **No overlap with official data yet.** MoSPI's CPI airfare series currently ends 2025-12
+  and scraping began 2026-09, so correlation is undefined today and is reported as
+  `pending_overlap`.
+* Only the nonstop economy product is indexed; `base_fare` / `taxes` aren't shown on the
+  sources' result cards.
+
+---
 
 ## API
 
-Swagger UI at **`/docs`** (this is the NSO/RBI-facing interface).
+Swagger UI at **`/docs`**.
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/meta` | routes, weights, windows, data mode, provenance (sources, snapshot time, real vs seeded days) |
-| GET | `/index/daily` | APIx per day, base day = 100, `is_synthetic` per point |
+| GET | `/health` | database reachability, scrape age, per-source health |
+| GET | `/meta` | routes, weights, windows, data mode, provenance |
+| GET | `/meta/cities` | city name, airport code and state for every code used |
+| GET | `/index/daily` | APIx per day, base day = 100 |
 | GET | `/index/forecast?days=5` | linear-trend forecast with band |
-| GET | `/index/heatmap` | route × window mean fares (latest day) |
-| GET | `/routes/{route}/trend` | fare per window with model overlay + carrier breakdown |
-| GET | `/fares/raw` | cleaned records; filter by `route`, `date_from/to`, `scrape_date`, `nonstop_only`, `include_synthetic` |
+| GET | `/index/heatmap` | route × booking-window average fares (latest day) |
+| GET | `/routes/{route}/trend` | fare per window with model overlay and airline breakdown |
+| GET | `/routes/{route}/best-time` | cheapest booking window over all history, in words |
+| GET | `/fares/raw` | cleaned fares; filter by `route`, `date_from/to`, `scrape_date`, `nonstop_only`; paginated |
 | GET | `/predict?route=&travel_date=&carrier=` | model fare estimate |
-| GET | `/model/info` | training metadata + hold-out metrics |
-| GET | `/festivals/surge` · `/festivals/calendar` | festival vs normal per route; the calendar |
-| GET | `/meta/cities` | city name, airport code and state for every code shown |
+| GET | `/model/info` | training metadata and hold-out metrics |
+| GET | `/festivals/surge` · `/festivals/calendar` | festival vs ordinary-day prices per route; the calendar |
 | GET | `/official/cpi` | official MoSPI CPI series (item or sub-group, by sector) |
-| GET | `/official/compare` | official CPI vs APIx: scale link, overlap stats, seasonal profile |
-| GET | `/backtest/dgca` | superseded by `/official/compare`; removed once the UI moves over |
-| POST | `/routes/save` | save a watched route (`browser_id`, origin, destination, preferred_days, email) |
-| GET | `/routes/saved/{browser_id}` · DELETE `/routes/saved/{browser_id}/{id}` | list / remove |
+| GET | `/official/compare` | official CPI vs APIx: link, overlap stats, seasonal profile |
+| POST | `/routes/save` | save an alert (`browser_id`, origin, destination, email) |
+| GET | `/routes/saved/{browser_id}` | list this browser's alerts |
+| DELETE | `/routes/{id}` | delete an alert — header `X-Browser-Id` must match its owner (404 otherwise) |
 | GET | `/routes/{browser_id}/alerts` | is any saved route cheap today |
+
+Errors use one envelope: `{"error", "detail", "path"}`.
 
 ## Repository layout
 
 ```
-scraper/            base.py (robots gate, rate limiter, snapshot writer), run.py, scheduler.py, backfill.py
-scraper/sources/    easemytrip.py, spicejet.py  (+ registry in __init__.py)
-pipeline/           db.py, clean.py, index.py, trend_forecast.py, fare_model.py, festivals.py, notifier.py, backtest.py, run_all.py
-backend/            main.py (FastAPI), fake_data.py (fallback when the store is empty), requirements.txt
-frontend/src/       pages/Dashboard.tsx, components/ (HeroStat, TrendChart, Heatmap, RoutePanel, FestivalsTab, MyRoutesTab, BacktestPanel, TopBar, ui.tsx, reactbits/)
-data/raw/           cached JSON snapshots (committed — the demo fallback)
-data/processed/     airindex.db (rebuilt, git-ignored)
-data/reference/     dgca_reference_fares.json
+scraper/            base.py (robots gate, rate limiter, retries, snapshot writer), run.py, scheduler.py
+scraper/sources/    easemytrip.py, spicejet.py (+ registry in __init__.py)
+pipeline/           db.py, clean.py, index.py, cities.py, mospi.py, official_compare.py,
+                    trend_forecast.py, fare_model.py, festivals.py, notifier.py, timeutil.py, run_all.py
+backend/            main.py (FastAPI), schemas.py (response models), requirements.txt
+frontend/src/       App.tsx (routes), pages/ (Home, Routes, Festivals/Official/Alerts/About),
+                    components/ (TopBar, Layout, CityCombobox, QuickCards, BestTimeCard, charts, ui.tsx, reactbits/),
+                    lib/ (appData, cities, glossary, motion), services/api.ts
+scripts/            build_demo_db.py, install_scheduler_task.ps1
+tests/              pytest suite; fixtures/ (synthetic generators, recorded MoSPI responses)
+data/raw/           cached JSON snapshots (committed)
+data/processed/     airindex.db, airindex_demo.db, jobs.db (rebuilt, git-ignored)
 data/models/        fare_model.pkl (rebuilt, git-ignored)
-.env.example        BREVO_API_KEY=   (copy to .env; .env is git-ignored)
 ```
 
-## Frontend notes
+## Website notes
 
-Light, responsive single-page dashboard (Vite + React + TypeScript + Tailwind + Recharts),
-written for travellers rather than statisticians.
-
-* **Plain English everywhere.** Every panel has a heading that says what it shows and a
-  "What does this mean?" (i) tooltip. Definitions live in one place,
-  `src/lib/glossary.ts`, shared by the tooltips and the *How it works* page, so the wording
-  never drifts. Empty states say *why* there's nothing yet. A skippable 4-step tour runs on
+* **Plain English everywhere.** Every panel says what it shows and has a "What does this
+  mean?" (i) tooltip. Definitions live once in `src/lib/glossary.ts`, shared with the
+  *How it works* page. Empty states say *why* there's nothing yet. A skippable tour runs on
   first visit and can be replayed from *How it works*.
-* **City names, never bare codes.** Routes render as "Delhi (DEL) → Mumbai (BOM)" — in
-  dropdowns, charts, tables, alerts and alert emails. The list lives once, in
-  `pipeline/cities.py`, and the frontend loads it from `GET /meta/cities`.
-* **Colour.** Semantic tokens are CSS variables in `src/index.css`, mirrored in
-  `tailwind.config.js` (`text-ink`, `bg-surface`, `bg-accent/10`…). Every text colour was
-  checked against WCAG AA (the most muted, `ink-3`, is 5.57:1); chart marks clear 3:1. The
-  price map runs light (cheap) → dark (expensive), and its cell labels switch between dark
-  and white text so every step stays above 4.5:1.
-* **Motion** uses React Bits components copied from `https://reactbits.dev/r/<Name>-TS-TW.json`:
-  Aurora (light mode) and Particles for a slow pastel background, BlurText for page titles,
-  AnimatedContent for sections scrolling in, CountUp for the headline index, GlareHover on
-  stat cards, Magnet on primary buttons, and BlobCursor + ClickSpark for the cursor.
-  `src/lib/motion.ts` turns the heavy effects off under *prefers-reduced-motion* and the
-  cursor effects off on touch screens. Animations never gate data: content is in the DOM
-  from the first render.
-* ClickSpark and BlobCursor are adapted for page-wide use (see the notes at the top of each
-  file): upstream ClickSpark sized its canvas to the whole document and redrew it every
-  frame even while idle; ours is viewport-sized and only animates while sparks are alive.
+* **City names, never bare codes.** "Delhi (DEL) → Mumbai (BOM)" everywhere. The list lives
+  once in `pipeline/cities.py` and is served by `GET /meta/cities`. City fields are an
+  accessible combobox (WAI-ARIA 1.2): type "Del", "delhi" or "DEL"; ↑/↓, Enter, Esc.
+* **States.** Every card and chart has a loading skeleton, an empty state from the API's
+  `available: false` message, and a friendly error with **Retry**. If the API is down the
+  whole site shows one message with Retry instead of a broken page.
+* **Accessible and mobile-first.** Works at 375 px (menu collapses to ☰; charts switch to
+  compact labels), WCAG AA colours (muted text 5.57:1, chart marks ≥ 3:1), visible focus
+  rings, full keyboard navigation with a skip link, focus moved to the content on each page
+  change, and `aria-label`s on icon buttons and every chart.
+* **Motion** uses React Bits components (Aurora, Particles, BlurText, AnimatedContent,
+  CountUp, GlareHover, Magnet, BlobCursor, ClickSpark). `src/lib/motion.ts` turns heavy
+  effects off under *prefers-reduced-motion* and cursor effects off on touch screens.
+  Animations never gate data.
 
 ## Adding a source
 
 1. Copy `scraper/sources/spicejet.py`, implement `build_url()` and `scrape_query()`.
 2. Register it in `scraper/sources/__init__.py`.
-3. Check its robots.txt first — the base class will refuse disallowed URLs anyway.
-4. `python -m scraper.run --source <name> --max 2` then `python -m pipeline.run_all`.
+3. Check its robots.txt first — the base class refuses disallowed URLs anyway.
+4. `python -m scraper.run --source <name> --max 2`, then `python -m pipeline.run_all`.

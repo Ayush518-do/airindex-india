@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { MagnetButton } from './Motion';
 import { fmtDate, inr } from './ui';
 import { routeLabel } from '../lib/cities';
@@ -45,8 +46,8 @@ function earlySaving(heatmap: Heatmap): number | null {
   return savings.reduce((a, b) => a + b, 0) / savings.length;
 }
 
-export default function HomeSummary({ daily, heatmap, windowShort, onSetAlert }: {
-  daily: IndexDaily; heatmap: Heatmap; windowShort: Record<string, string>; onSetAlert: () => void;
+export default function HomeSummary({ daily, heatmap, windowShort }: {
+  daily: IndexDaily; heatmap: Heatmap; windowShort: Record<string, string>;
 }) {
   const movement = priceMovement(daily);
   const cheap = cheapestNow(heatmap, windowShort);
@@ -76,9 +77,12 @@ export default function HomeSummary({ daily, heatmap, windowShort, onSetAlert }:
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <MagnetButton>
-          <button onClick={onSetAlert} className="btn-primary">🔔 Tell me when fares drop</button>
+          <Link to="/routes" className="btn-primary">See route prices →</Link>
         </MagnetButton>
-        <span className="text-[13px] text-ink-3">Free email alert — no account needed.</span>
+        <MagnetButton>
+          <Link to="/alerts" className="btn-ghost">🔔 Set a price alert</Link>
+        </MagnetButton>
+        <span className="text-[13px] text-ink-3">Free email alerts — no account needed.</span>
       </div>
     </section>
   );

@@ -54,6 +54,11 @@ WINDOW_SHORT: dict[str, str] = {
 }
 
 
+# The offset we actually scrape inside each window (scraper.base.DEFAULT_OFFSETS),
+# so "about 21 days before travel" describes the fares we really observed.
+WINDOW_TYPICAL_DAYS: dict[str, int] = {"0-3": 2, "4-7": 5, "8-14": 10, "15-30": 21, "31-60": 45}
+
+
 def city_name(code: str) -> str:
     """'DEL' -> 'Delhi'. Unknown codes fall back to the code itself."""
     return CITIES.get(code.upper(), {}).get("city", code.upper())

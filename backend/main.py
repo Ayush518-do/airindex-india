@@ -31,7 +31,7 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -39,9 +39,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from backend import schemas as S
 from pipeline import timeutil
-from pipeline import backtest, fare_model, festivals, notifier, official_compare
+from pipeline import fare_model, festivals, notifier, official_compare
 from pipeline import index as index_engine
-from pipeline.cities import WINDOW_LABELS, WINDOW_SHORT, as_list as cities_list, route_label
+from pipeline.cities import WINDOW_LABELS, WINDOW_SHORT, WINDOW_TYPICAL_DAYS, as_list as cities_list, route_label
 import pipeline.db as dbmod
 from pipeline.db import DATA_MODE, DEMO_MODE, assert_mode_consistent, connect, init_db
 from pipeline.trend_forecast import LOOKBACK_DAYS, linear_forecast
@@ -402,6 +402,49 @@ def predict(
     return out
 
 
+# A window needs this many fares in total before we call it "cheapest".
+BEST_TIME_MIN_FARES = 20
+
+
+@app.get("/routes/{route}/best-time", tags=["routes"], response_model=S.BestTime)
+def best_time(route: str, conn: sqlite3.Connection = Depends(get_db)):
+    """
+    When is it cheapest to book this route? Averages each booking window over
+    every day in route_daily (weighted by fares seen), so one odd day can't
+    decide it. Needs at least two windows with enough fares to compare.
+    """
+    route = _validate_route(route)
+    rows = conn.execute(
+        "SELECT window, SUM(avg_fare * n) / SUM(n) AS avg_fare, SUM(n) AS n, COUNT(DISTINCT date) AS days "
+        "FROM route_daily WHERE route = ? GROUP BY window", (route,)
+    ).fetchall()
+    windows = [
+        {"window": r["window"], "label": WINDOW_SHORT.get(r["window"], r["window"]),
+         "typical_days": WINDOW_TYPICAL_DAYS.get(r["window"]), "avg_fare": round(r["avg_fare"]),
+         "n": r["n"], "days": r["days"]}
+        for r in rows if r["n"] >= BEST_TIME_MIN_FARES
+    ]
+    windows.sort(key=lambda w: index_engine.WINDOWS.index(w["window"]) if w["window"] in index_engine.WINDOWS else 99)
+    if len(windows) < 2:
+        return _unavailable(
+            "insufficient_history",
+            f"We don't have enough prices for {route_label(route)} yet to say when it's cheapest to book. "
+            "Check back after a few more daily checks.",
+            route=route, label=route_label(route), windows=windows,
+        )
+    best = min(windows, key=lambda w: w["avg_fare"])
+    worst = max(windows, key=lambda w: w["avg_fare"])
+    saving = round((1 - best["avg_fare"] / worst["avg_fare"]) * 100, 1)
+    days = best["typical_days"]
+    return {
+        "available": True, "route": route, "label": route_label(route),
+        "best": best, "worst": worst, "saving_pct": saving, "windows": windows,
+        "n_days": max(w["days"] for w in windows),
+        "summary": f"Cheapest to book about {days} days before travel (avg ₹{best['avg_fare']:,})"
+                   if days else f"Cheapest to book {best['label']} (avg ₹{best['avg_fare']:,})",
+    }
+
+
 @app.get("/model/info", tags=["routes"])
 def model_info():
     """Training metadata + hold-out metrics of the current fare model."""
@@ -512,17 +555,6 @@ def official_comparison(conn: sqlite3.Connection = Depends(get_db)):
 
 
 # --------------------------------------------------------------------------- #
-# Back-test (superseded by /official/compare; removed once the UI moves over)
-# --------------------------------------------------------------------------- #
-@app.get("/backtest/dgca", tags=["index"], deprecated=True)
-def backtest_dgca(include_synthetic: bool = Query(False), conn: sqlite3.Connection = Depends(get_db)):
-    """Deprecated: illustrative reference table. Use /official/compare."""
-    if not _has_snapshot_data(conn):
-        return _unavailable("no_index_data", NO_DATA_MSG, comparison=[], series=[])
-    return backtest.compute(conn, include_synthetic=include_synthetic)
-
-
-# --------------------------------------------------------------------------- #
 # Festivals
 # --------------------------------------------------------------------------- #
 @app.get("/festivals/surge", tags=["festivals"], response_model=S.FestivalSurge)
@@ -580,9 +612,20 @@ def list_saved_routes(browser_id: str, conn: sqlite3.Connection = Depends(get_db
     return {"browser_id": browser_id, "routes": [_saved_row(r) for r in rows]}
 
 
-@app.delete("/routes/saved/{browser_id}/{route_id}", tags=["alerts"], status_code=204)
-def delete_saved_route(browser_id: str, route_id: int, conn: sqlite3.Connection = Depends(get_db)):
-    cur = conn.execute("DELETE FROM saved_routes WHERE browser_id = ? AND id = ?", (browser_id, route_id))
+@app.delete("/routes/{route_id}", tags=["alerts"], status_code=204)
+def delete_saved_route(
+    route_id: int,
+    x_browser_id: str = Header(..., alias="X-Browser-Id", min_length=6, max_length=64,
+                               description="The browser_id that created the alert"),
+    conn: sqlite3.Connection = Depends(get_db),
+):
+    """
+    Delete one saved alert — only if it belongs to this browser. The owner check
+    is part of the WHERE clause, and another browser's alert gets the same 404
+    as a missing one, so ids can't be probed. The id comes in the header rather
+    than the URL so it stays out of access logs.
+    """
+    cur = conn.execute("DELETE FROM saved_routes WHERE id = ? AND browser_id = ?", (route_id, x_browser_id))
     conn.commit()
     if cur.rowcount == 0:
         raise HTTPException(404, "That alert doesn't exist (it may already have been removed).")

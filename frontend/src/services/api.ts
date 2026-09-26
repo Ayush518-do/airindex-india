@@ -204,6 +204,21 @@ export interface RouteAlerts {
   }[];
 }
 
+export interface BookingWindow {
+  window: string; label: string; typical_days: number | null; avg_fare: number; n: number; days: number;
+}
+
+export interface BestTime extends Availability {
+  route: string;
+  label: string;
+  best?: BookingWindow | null;
+  worst?: BookingWindow | null;
+  saving_pct?: number | null;
+  windows: BookingWindow[];
+  n_days: number;
+  summary?: string | null;
+}
+
 export interface Prediction {
   route: string; carrier: string; travel_date: string; as_of: string; predicted_fare: number;
   features: Record<string, string | number>;
@@ -253,8 +268,12 @@ export const saveRoute = (body: {
 }) => api.post<SavedRoute>('/routes/save', body).then(r => r.data);
 export const getSavedRoutes = (browserId: string) =>
   api.get<{ browser_id: string; routes: SavedRoute[] }>(`/routes/saved/${browserId}`).then(r => r.data);
+/** Only deletes if the alert belongs to this browser (checked server-side). */
 export const deleteSavedRoute = (browserId: string, id: number) =>
-  api.delete(`/routes/saved/${browserId}/${id}`).then(() => undefined);
+  api.delete(`/routes/${id}`, { headers: { 'X-Browser-Id': browserId } }).then(() => undefined);
+export const getBestTime = (route: string) => api.get<BestTime>(`/routes/${route}/best-time`).then(r => r.data);
+export const getFestivalCalendar = () =>
+  api.get<{ festivals: Festival[] }>('/festivals/calendar').then(r => r.data);
 export const getRouteAlerts = (browserId: string) =>
   api.get<RouteAlerts>(`/routes/${browserId}/alerts`).then(r => r.data);
 export const getOfficialCompare = () => api.get<OfficialCompare>('/official/compare').then(r => r.data);

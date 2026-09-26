@@ -16,19 +16,21 @@ const STEPS = [
     body: 'One number for how expensive flying is today. 100 = prices on our first day; 110 would mean fares are 10% higher.',
   },
   {
-    target: '[data-tour="prices"]',
-    title: 'Prices by route',
-    body: 'Each row is a route, each column is how far ahead you book. Darker = more expensive. Tap a route to see the best time to book it.',
+    target: '[data-tour="quick"]',
+    title: 'Quick answers',
+    body: 'The cheapest route today, the best time to book, and the next festival price jump — each links to the full details.',
   },
   {
     target: '[data-tour="festivals-tab"]',
     title: 'Festival prices',
     body: 'See how much fares jump around Diwali and other festivals, route by route.',
+    menu: 'Festivals',
   },
   {
     target: '[data-tour="alerts-tab"]',
     title: 'Get a price alert',
     body: "Pick a route and add your email. We'll tell you when it gets cheaper than usual — no account needed.",
+    menu: 'My alerts',
   },
 ] as const;
 
@@ -52,8 +54,10 @@ export default function Guide({ onClose }: { onClose: () => void }) {
   const measure = useCallback(() => {
     const el = document.querySelector(s.target);
     setVw(window.innerWidth);
-    if (!el) { setRect(null); return; }
-    const r = el.getBoundingClientRect();
+    const r = el?.getBoundingClientRect();
+    // A hidden target (nav links live in the ☰ menu on phones) measures 0×0;
+    // treat it as absent rather than spotlighting the top-left corner.
+    if (!r || r.width === 0 || r.height === 0) { setRect(null); return; }
     setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
   }, [s.target]);
 
@@ -122,7 +126,10 @@ export default function Guide({ onClose }: { onClose: () => void }) {
           Quick tour · {step + 1} of {STEPS.length}
         </p>
         <h2 id="guide-title" className="mt-1 text-[17px] font-semibold text-ink">{s.title}</h2>
-        <p id="guide-body" className="mt-1.5 text-[14px] leading-relaxed text-ink-2">{s.body}</p>
+        <p id="guide-body" className="mt-1.5 text-[14px] leading-relaxed text-ink-2">
+          {s.body}
+          {!rect && 'menu' in s && <> Find <b className="text-ink">{s.menu}</b> in the menu (☰) at the top.</>}
+        </p>
         <div className="mt-4 flex items-center gap-2">
           <button onClick={finish} className="mr-auto text-[14px] text-ink-3 underline-offset-2 hover:text-ink hover:underline">
             Skip tour

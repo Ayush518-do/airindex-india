@@ -46,3 +46,8 @@ export function useMotionSettings() {
     cursorEffects: !reduced && !coarse,
   };
 }
+
+/** Phone-width layout (below Tailwind's `sm`): charts switch to compact labels. */
+export function useNarrow(): boolean {
+  return useMediaQuery('(max-width: 639px)');
+}

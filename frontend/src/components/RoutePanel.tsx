@@ -1,27 +1,31 @@
 import { useId } from 'react';
+import CityCombobox from './CityCombobox';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell, LabelList,
 } from 'recharts';
 import {
-  Panel, PanelSkeleton, EmptyState, SERIES, STATUS, GRID, INK, tooltipStyle, inr, inrShort, axisTick, axisLabel, fmtLongDate,
+  Panel, PanelSkeleton, EmptyState, ErrorState, SERIES, STATUS, GRID, INK, tooltipStyle, inr, inrShort, axisTick, axisLabel, fmtLongDate,
 } from './ui';
 import { GLOSSARY } from '../lib/glossary';
 import { routeLabel } from '../lib/cities';
+import { useNarrow } from '../lib/motion';
 import type { RouteTrend } from '../services/api';
 
-export function FilterPanel({ routes, route, onRoute, dateFrom, dateTo, onDates, nonstop, onNonstop, onReset }: {
-  routes: string[]; route: string; onRoute: (r: string) => void;
+export function FilterPanel({ origins, destinations, origin, destination, onOrigin, onDestination,
+  dateFrom, dateTo, onDates, nonstop, onNonstop, onReset }: {
+  origins: string[]; destinations: string[]; origin: string; destination: string;
+  onOrigin: (c: string) => void; onDestination: (c: string) => void;
   dateFrom: string; dateTo: string; onDates: (from: string, to: string) => void;
   nonstop: boolean; onNonstop: (v: boolean) => void; onReset: () => void;
 }) {
   const id = useId();
   return (
-    <div className="card flex flex-wrap items-end gap-x-5 gap-y-3 px-4 py-4" role="group" aria-label="Filter prices">
-      <div className="min-w-[240px] flex-1">
-        <label htmlFor={`${id}-route`} className="mb-1 block text-[13px] font-medium text-ink-2">Route</label>
-        <select id={`${id}-route`} value={route} onChange={e => onRoute(e.target.value)} className="field">
-          {routes.map(r => <option key={r} value={r}>{routeLabel(r)}</option>)}
-        </select>
+    <div className="card grid grid-cols-1 items-end gap-x-5 gap-y-3 px-4 py-4 sm:grid-cols-2 lg:flex lg:flex-wrap" role="group" aria-label="Choose a route and dates">
+      <div className="lg:min-w-[220px] lg:flex-1">
+        <CityCombobox id={`${id}-o`} label="From" value={origin} onChange={onOrigin} options={origins} />
+      </div>
+      <div className="lg:min-w-[220px] lg:flex-1">
+        <CityCombobox id={`${id}-d`} label="To" value={destination} onChange={onDestination} options={destinations} />
       </div>
       <div>
         <label htmlFor={`${id}-from`} className="mb-1 block text-[13px] font-medium text-ink-2">Travelling from</label>
@@ -35,12 +39,23 @@ export function FilterPanel({ routes, route, onRoute, dateFrom, dateTo, onDates,
         <input type="checkbox" checked={nonstop} onChange={e => onNonstop(e.target.checked)} className="h-4 w-4 accent-accent" />
         Direct flights only
       </label>
-      <button onClick={onReset} className="btn-ghost mb-0.5">Clear filters</button>
+      <button type="button" onClick={onReset} className="btn-ghost mb-0.5 justify-self-start">Clear filters</button>
     </div>
   );
 }
 
-export function ElasticityChart({ trend }: { trend: RouteTrend | null }) {
+// Compact tick labels for phones, where five "1–2 weeks ahead" labels collide.
+const TICK_SHORT: Record<string, string> = { '0-3': '0–3d', '4-7': '4–7d', '8-14': '1–2wk', '15-30': '2–4wk', '31-60': '1–2mo' };
+
+export function ElasticityChart({ trend, error, onRetry }: { trend: RouteTrend | null; error?: string | null; onRetry?: () => void }) {
+  const narrow = useNarrow();
+  if (error) {
+    return (
+      <Panel title="When should you book?">
+        <ErrorState message={error} onRetry={onRetry} />
+      </Panel>
+    );
+  }
   if (!trend) return <PanelSkeleton height={280} />;
 
   const title = <>When should you book?</>;
@@ -54,7 +69,7 @@ export function ElasticityChart({ trend }: { trend: RouteTrend | null }) {
   }
 
   const best = trend.best_window;
-  const rows = trend.windows.map(w => ({ ...w, tick: w.label ?? w.window }));
+  const rows = trend.windows.map(w => ({ ...w, tick: narrow ? (TICK_SHORT[w.window] ?? w.window) : (w.label ?? w.window) }));
   const hasPred = trend.windows.some(w => w.predicted_avg != null);
   const label = routeLabel(trend.route);
 
@@ -74,9 +89,9 @@ export function ElasticityChart({ trend }: { trend: RouteTrend | null }) {
 
       <div style={{ width: '100%', height: 280 }} role="img"
         aria-label={`Average fare for ${label} by how many days before the flight you book. ${
-          rows.filter(r => r.actual_avg != null).map(r => `${r.tick}: ${inr(r.actual_avg!)}`).join('; ')}.`}>
+          rows.filter(r => r.actual_avg != null).map(r => `${r.label ?? r.window}: ${inr(r.actual_avg!)}`).join('; ')}.`}>
         <ResponsiveContainer>
-          <ComposedChart data={rows} margin={{ top: 20, right: 12, bottom: 22, left: 16 }} barCategoryGap="26%">
+          <ComposedChart data={rows} margin={{ top: 20, right: narrow ? 4 : 12, bottom: 22, left: narrow ? 4 : 16 }} barCategoryGap="26%">
             <CartesianGrid stroke={GRID} vertical={false} />
             <XAxis dataKey="tick" stroke={GRID} tick={axisTick} tickLine={false} interval={0}
               label={axisLabel('Days before flight')} />

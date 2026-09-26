@@ -61,7 +61,7 @@ def _official(conn, n_months: int = 24) -> None:
     ("/festivals/surge", "no_index_data"),
     ("/official/cpi", "no_official_data"),
     ("/official/compare", "no_official_data"),
-    ("/backtest/dgca", "no_index_data"),
+    ("/routes/DEL-BOM/best-time", "insufficient_history"),
 ])
 def test_empty_store_reports_unavailable(empty_client, path, reason):
     r = empty_client.get(path)
@@ -283,8 +283,9 @@ def test_alert_lifecycle(client):
     assert alerts["threshold_pct"] == 15.0 and alerts["baseline_days"] == 14
     assert alerts["alerts"][0]["label"] == "Delhi (DEL) → Mumbai (BOM)"
 
-    assert client.delete(f"/routes/saved/browser-123/{saved['id']}").status_code == 204
-    _is_error(client.delete(f"/routes/saved/browser-123/{saved['id']}"), 404)
+    mine = {"X-Browser-Id": "browser-123"}
+    assert client.delete(f"/routes/{saved['id']}", headers=mine).status_code == 204
+    _is_error(client.delete(f"/routes/{saved['id']}", headers=mine), 404)
     assert client.get("/routes/saved/browser-123").json()["routes"] == []
 
 
@@ -323,7 +324,71 @@ def test_cors_allows_the_frontend_origin(client):
 
 def test_openapi_documents_every_route(client):
     paths = set(client.get("/openapi.json").json()["paths"])
+    assert "/backtest/dgca" not in paths, "superseded by /official/compare"
     for p in ["/health", "/meta", "/meta/cities", "/index/daily", "/index/forecast", "/index/heatmap",
               "/routes/{route}/trend", "/fares/raw", "/predict", "/official/cpi", "/official/compare",
-              "/festivals/surge", "/routes/save", "/routes/{browser_id}/alerts"]:
+              "/festivals/surge", "/routes/save", "/routes/{browser_id}/alerts",
+              "/routes/{route}/best-time", "/routes/{route_id}"]:
         assert p in paths
+
+
+# --------------------------------------------------------------------------- #
+# Deleting alerts is scoped to the browser that created them
+# --------------------------------------------------------------------------- #
+def test_another_browser_cannot_delete_my_alert(client):
+    rid = client.post("/routes/save", json=ALERT).json()["id"]
+    # Same 404 as a missing id, so ids can't be probed for existence.
+    _is_error(client.delete(f"/routes/{rid}", headers={"X-Browser-Id": "someone-else"}), 404)
+    assert [r["id"] for r in client.get("/routes/saved/browser-123").json()["routes"]] == [rid]
+
+
+def test_delete_requires_the_browser_header(client):
+    rid = client.post("/routes/save", json=ALERT).json()["id"]
+    _is_error(client.delete(f"/routes/{rid}"), 422)
+
+
+def test_deleting_one_alert_leaves_the_others(client):
+    a = client.post("/routes/save", json=ALERT).json()["id"]
+    b = client.post("/routes/save", json={**ALERT, "destination": "BLR"}).json()["id"]
+    assert client.delete(f"/routes/{a}", headers={"X-Browser-Id": "browser-123"}).status_code == 204
+    assert [r["id"] for r in client.get("/routes/saved/browser-123").json()["routes"]] == [b]
+
+
+# --------------------------------------------------------------------------- #
+# Best time to book
+# --------------------------------------------------------------------------- #
+def test_best_time_picks_the_cheapest_window(client, conn):
+    body = client.get("/routes/DEL-BOM/best-time").json()
+    assert body["available"] is True
+    fares = {w["window"]: w["avg_fare"] for w in body["windows"]}
+    assert body["best"]["avg_fare"] == min(fares.values())
+    assert body["summary"].startswith("Cheapest to book about")
+    assert "before travel" in body["summary"] and "₹" in body["summary"]
+    assert 0 <= body["saving_pct"] < 100
+
+
+def test_best_time_uses_all_history_not_one_day(conn, db_path):
+    # Day 1: the 0-3 window is cheap once; every other day it's the dearest.
+    rows = [("2026-09-01", "0-3", 3000), ("2026-09-01", "31-60", 6000)]
+    rows += [(f"2026-09-{d:02d}", "0-3", 9000) for d in range(2, 8)]
+    rows += [(f"2026-09-{d:02d}", "31-60", 6000) for d in range(2, 8)]
+    for date_, w, fare in rows:
+        conn.execute("INSERT INTO route_daily (date, route, window, avg_fare, median_fare, min_fare, n, is_synthetic)"
+                     " VALUES (?, 'DEL-BOM', ?, ?, ?, ?, 25, 0)", (date_, w, fare, fare, fare))
+    conn.commit()
+    from backend.main import app
+    with TestClient(app) as c:
+        body = c.get("/routes/DEL-BOM/best-time").json()
+    assert body["best"]["window"] == "31-60"
+    assert body["best"]["typical_days"] == 45
+
+
+def test_best_time_needs_enough_fares(conn, db_path):
+    conn.execute("INSERT INTO route_daily (date, route, window, avg_fare, median_fare, min_fare, n, is_synthetic)"
+                 " VALUES ('2026-09-01', 'DEL-BOM', '0-3', 5000, 5000, 5000, 3, 0)")
+    conn.commit()
+    from backend.main import app
+    with TestClient(app) as c:
+        body = c.get("/routes/DEL-BOM/best-time").json()
+    assert body["available"] is False and body["reason"] == "insufficient_history"
+    assert "Delhi (DEL)" in body["message"]

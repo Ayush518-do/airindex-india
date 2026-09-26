@@ -1,15 +1,19 @@
 import { useEffect, useId, useMemo, useState } from 'react';
 import PageHeader from './PageHeader';
 import { MagnetButton, Section } from './Motion';
-import { Panel, EmptyState, InfoTip, inr, fmtLongDate } from './ui';
+import CityCombobox from './CityCombobox';
+import { Panel, EmptyState, ErrorState, InfoTip, Skeleton, inr, fmtLongDate } from './ui';
 import { GLOSSARY } from '../lib/glossary';
-import { cityLabel, routeLabel } from '../lib/cities';
+import { cityName, routeLabel } from '../lib/cities';
 import {
   saveRoute, getSavedRoutes, deleteSavedRoute, getRouteAlerts, getPrediction, friendlyError,
   type SavedRoute, type RouteAlerts, type Prediction,
 } from '../services/api';
 
 const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Deliberately simple: something@something.tld, no spaces. The server validates too.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 function loadEmail() { try { return localStorage.getItem('airindex_email') ?? ''; } catch { return ''; } }
 function storeEmail(v: string) { try { localStorage.setItem('airindex_email', v); } catch { /* private mode */ } }
@@ -18,29 +22,43 @@ export default function MyRoutesTab({ browserId, routes, alerts, onAlertsChange 
   browserId: string; routes: string[]; alerts: RouteAlerts | null; onAlertsChange: (a: RouteAlerts) => void;
 }) {
   const id = useId();
-  // Only offer pairs we actually track, so the form can't produce a dead end.
+  // Every city we fly to or from can be picked; the pair is checked on submit
+  // so the traveller gets a clear reason rather than a silently shrunk list.
   const origins = useMemo(() => Array.from(new Set(routes.map(r => r.split('-')[0]))), [routes]);
-  const [origin, setOrigin] = useState(origins[0] ?? 'DEL');
-  const destinations = useMemo(
-    () => routes.filter(r => r.startsWith(`${origin}-`)).map(r => r.split('-')[1]), [routes, origin]);
-  const [destination, setDestination] = useState(destinations[0] ?? '');
-  useEffect(() => { if (!destinations.includes(destination)) setDestination(destinations[0] ?? ''); }, [destinations, destination]);
+  const destinations = useMemo(() => Array.from(new Set(routes.map(r => r.split('-')[1]))), [routes]);
+  const [origin, setOrigin] = useState(origins.includes('DEL') ? 'DEL' : origins[0] ?? '');
+  const [destination, setDestination] = useState(destinations.includes('BOM') ? 'BOM' : destinations[0] ?? '');
+  const [errors, setErrors] = useState<{ route?: string; email?: string }>({});
 
   const [email, setEmail] = useState(loadEmail);
-  const [saved, setSaved] = useState<SavedRoute[]>([]);
+  const [saved, setSaved] = useState<SavedRoute[] | null>(null);
+  const [listErr, setListErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [predDate, setPredDate] = useState(() => iso(new Date(Date.now() + 21 * 864e5)));
   const [pred, setPred] = useState<Prediction | null>(null);
   const [predErr, setPredErr] = useState<string | null>(null);
 
-  const route = destination ? `${origin}-${destination}` : '';
+  const route = origin && destination && routes.includes(`${origin}-${destination}`) ? `${origin}-${destination}` : '';
 
   const refresh = async () => {
     const [s, a] = await Promise.all([getSavedRoutes(browserId), getRouteAlerts(browserId)]);
     setSaved(s.routes); onAlertsChange(a);
   };
-  useEffect(() => { refresh().catch(() => {}); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [browserId]);
+  const loadList = () => { setListErr(null); refresh().catch(e => setListErr(friendlyError(e))); };
+  useEffect(loadList, [browserId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const validate = () => {
+    const next: { route?: string; email?: string } = {};
+    if (origin === destination) next.route = 'From and To must be different cities.';
+    else if (!routes.includes(`${origin}-${destination}`))
+      next.route = `We don't track flights from ${cityName(origin)} to ${cityName(destination)} yet. Try another destination.`;
+    const e = email.trim();
+    if (!e) next.email = 'Please enter your email address.';
+    else if (!EMAIL_RE.test(e)) next.email = "That email address doesn't look right. Check for typos (for example you@example.com).";
+    setErrors(next);
+    return next;
+  };
 
   useEffect(() => {
     if (!route) return;
@@ -54,25 +72,35 @@ export default function MyRoutesTab({ browserId, routes, alerts, onAlertsChange 
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setBusy(true); setMsg(null);
+    setMsg(null);
+    const v = validate();
+    if (v.route || v.email) {
+      // Move focus to the first problem so keyboard and screen-reader users land on it.
+      document.getElementById(v.route ? `${id}-to` : `${id}-email`)?.focus();
+      return;
+    }
+    setBusy(true);
+    const clean = email.trim();
     try {
-      await saveRoute({ browser_id: browserId, origin, destination, preferred_days: [], email });
-      storeEmail(email);
+      await saveRoute({ browser_id: browserId, origin, destination, preferred_days: [], email: clean });
+      storeEmail(clean);
       await refresh();
-      setMsg({ tone: 'ok', text: `Done! We'll email ${email} when ${routeLabel(route)} gets more than ${alerts?.threshold_pct ?? 15}% cheaper than usual.` });
+      setMsg({ tone: 'ok', text: `Done! We'll email ${clean} when ${routeLabel(route)} gets more than ${alerts?.threshold_pct ?? 15}% cheaper than usual.` });
     } catch (err) {
       setMsg({ tone: 'err', text: friendlyError(err) });
     } finally { setBusy(false); }
   };
 
+  const [removing, setRemoving] = useState<number | null>(null);
   const remove = async (r: SavedRoute) => {
+    setRemoving(r.id);
     try {
       await deleteSavedRoute(browserId, r.id);
       await refresh();
-      setMsg({ tone: 'ok', text: `Alert for ${r.label ?? routeLabel(`${r.origin}-${r.destination}`)} removed.` });
+      setMsg({ tone: 'ok', text: `Alert for ${r.label ?? routeLabel(`${r.origin}-${r.destination}`)} deleted.` });
     } catch (err) {
       setMsg({ tone: 'err', text: friendlyError(err) });
-    }
+    } finally { setRemoving(null); }
   };
 
   const alertFor = (r: SavedRoute) => alerts?.alerts.find(a => a.route === `${r.origin}-${r.destination}`);
@@ -88,28 +116,24 @@ export default function MyRoutesTab({ browserId, routes, alerts, onAlertsChange 
           <Panel title="Set up an alert">
             <form onSubmit={submit} className="space-y-4" noValidate>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-1">
-                <div>
-                  <label htmlFor={`${id}-from`} className="mb-1 block text-[14px] font-medium text-ink-2">From</label>
-                  <select id={`${id}-from`} value={origin} onChange={e => setOrigin(e.target.value)} className="field">
-                    {origins.map(c => <option key={c} value={c}>{cityLabel(c)}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor={`${id}-to`} className="mb-1 block text-[14px] font-medium text-ink-2">To</label>
-                  <select id={`${id}-to`} value={destination} onChange={e => setDestination(e.target.value)} className="field">
-                    {destinations.map(c => <option key={c} value={c}>{cityLabel(c)}</option>)}
-                  </select>
-                </div>
+                <CityCombobox id={`${id}-from`} label="From" value={origin} options={origins}
+                  onChange={c => { setOrigin(c); setErrors(x => ({ ...x, route: undefined })); }} />
+                <CityCombobox id={`${id}-to`} label="To" value={destination} options={destinations}
+                  onChange={c => { setDestination(c); setErrors(x => ({ ...x, route: undefined })); }}
+                  error={errors.route} />
               </div>
               <div>
                 <label htmlFor={`${id}-email`} className="mb-1 block text-[14px] font-medium text-ink-2">Your email</label>
-                <input id={`${id}-email`} type="email" required autoComplete="email" value={email}
-                  onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className="field"
-                  aria-describedby={`${id}-email-hint`} />
+                <input id={`${id}-email`} type="email" autoComplete="email" inputMode="email" value={email}
+                  onChange={e => { setEmail(e.target.value); if (errors.email) setErrors(x => ({ ...x, email: undefined })); }}
+                  placeholder="you@example.com" className="field"
+                  aria-invalid={!!errors.email}
+                  aria-describedby={`${id}-email-hint${errors.email ? ` ${id}-email-err` : ''}`} />
+                {errors.email && <p id={`${id}-email-err`} className="mt-1 text-[13px] font-medium text-bad">{errors.email}</p>}
                 <p id={`${id}-email-hint`} className="mt-1 text-[13px] text-ink-3">We only use this to send your alerts.</p>
               </div>
               <MagnetButton className="w-full">
-                <button type="submit" disabled={busy || !email.includes('@') || !destination} className="btn-primary w-full">
+                <button type="submit" disabled={busy} className="btn-primary w-full">
                   {busy ? 'Saving…' : '🔔 Create alert'}
                 </button>
               </MagnetButton>
@@ -157,7 +181,13 @@ export default function MyRoutesTab({ browserId, routes, alerts, onAlertsChange 
             <Panel title="Your alerts"
               info={GLOSSARY.usualPrice.short}
               subtitle={alerts ? `Prices compared with each route's usual price over the last ${alerts.baseline_days} days.` : undefined}>
-              {saved.length === 0 ? (
+              {listErr ? (
+                <ErrorState message={listErr} onRetry={loadList} />
+              ) : saved == null ? (
+                <div className="space-y-2" role="status" aria-label="Loading your alerts">
+                  {[0, 1].map(i => <Skeleton key={i} className="h-16 w-full !rounded-xl" />)}
+                </div>
+              ) : saved.length === 0 ? (
                 <EmptyState icon="🔔" title="No alerts yet"
                   message="Create one on the left and it will show up here, with today's price next to the usual price." />
               ) : (
@@ -186,9 +216,10 @@ export default function MyRoutesTab({ browserId, routes, alerts, onAlertsChange 
                           )}
                           {a && a.pct_below_baseline == null && <span className="text-ink-3">Watching — needs a few more days of prices</span>}
                         </p>
-                        <button onClick={() => remove(r)} className="btn-ghost !px-3 !py-1.5 text-[13px]"
-                          aria-label={`Remove alert for ${label}`}>
-                          Remove
+                        <button type="button" onClick={() => remove(r)} disabled={removing === r.id}
+                          className="btn-ghost !px-3 !py-1.5 text-[13px]"
+                          aria-label={`Delete alert for ${label}`}>
+                          {removing === r.id ? 'Deleting…' : 'Delete'}
                         </button>
                       </li>
                     );

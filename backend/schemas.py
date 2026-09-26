@@ -233,6 +233,26 @@ class FaresRaw(Availability):
     next_offset: int | None = None
 
 
+class BookingWindow(BaseModel):
+    window: str
+    label: str
+    typical_days: int | None = None
+    avg_fare: int
+    n: int
+    days: int
+
+
+class BestTime(Availability):
+    route: str
+    label: str
+    best: BookingWindow | None = None
+    worst: BookingWindow | None = None
+    saving_pct: float | None = None
+    windows: list[BookingWindow] = []
+    n_days: int = 0
+    summary: str | None = Field(None, description="Plain-English, e.g. 'Cheapest to book about 21 days before travel (avg ₹5,420)'")
+
+
 class Prediction(BaseModel):
     route: str
     carrier: str
