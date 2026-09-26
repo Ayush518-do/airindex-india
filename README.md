@@ -150,7 +150,7 @@ links and the back button work):
 
 | Page | URL | What's on it |
 |---|---|---|
-| Landing | `/` | full-screen hero video, live numbers, how it works, why it matters, the team |
+| Landing | `/` | intro video (first visit), live numbers, how it works, why it matters |
 | Home | `/home` | today's index, a plain-English summary, and quick answers: cheapest route today, best time to book, next festival price jump |
 | Routes | `/routes?from=DEL&to=BOM` | city search, best time to book, prices by booking time, the price map, and the individual flights found |
 | Festivals | `/festivals` | how much fares jump around each festival, per route |
@@ -400,8 +400,8 @@ pipeline/           db.py, clean.py, index.py, cities.py, mospi.py, official_com
 backend/            main.py (FastAPI), schemas.py (response models), requirements.txt
 frontend/src/       App.tsx (routes), pages/ (Landing, Home, Routes, Festivals/Official/Alerts/About),
                     components/ (TopBar, Layout, CityCombobox, QuickCards, BestTimeCard, charts, ui.tsx, reactbits/),
-                    lib/ (appData, cities, glossary, motion, team), services/api.ts
-frontend/public/media/  hero video loop, poster and transition clip
+                    lib/ (appData, cities, glossary, motion), services/api.ts
+frontend/public/media/  intro video (+ mobile encode, poster) and the clouds background
 scripts/            build_demo_db.py, install_scheduler_task.ps1
 tests/              pytest suite; fixtures/ (synthetic generators, recorded MoSPI responses)
 data/raw/           cached JSON snapshots (committed)
@@ -425,17 +425,16 @@ data/models/        fare_model.pkl (rebuilt, git-ignored)
   compact labels), WCAG AA colours (muted text ≥ 4.9:1, chart marks ≥ 3:1), visible focus
   rings, full keyboard navigation with a skip link, focus moved to the content on each page
   change, and `aria-label`s on icon buttons and every chart.
-* **Landing page** (`src/pages/LandingPage.tsx`). A calm 8-second loop of flying alongside
-  the plane (`public/media/hero-cruise.*`; 1280w encode below 768 px), with a slow sideways
-  drift and slight mouse parallax, never a zoom. The poster paints first and the video
-  streams in behind it. The still is shown instead under reduced motion, with Data Saver,
-  or on a 2G-class connection. Add `?video=1` to force the video, which helps when venue
-  Wi-Fi misreports its speed, or `?video=0` to force the still. "Explore today's fares"
-  plays `transition.mp4` (the plane passes the camera and the screen goes white), then the
-  dashboard fades in from white; Esc or a click skips it, and it's skipped entirely under
-  reduced motion. `hero.*` / `hero-mobile.mp4` (plane approaching) are kept but unused.
-* **Team details** live in one file, `src/lib/team.ts`. Replace the bracketed placeholders
-  with your team name, college, members, roles and mentor.
+* **Landing page** (`src/pages/LandingPage.tsx`). On the first visit in a browser session
+  a ~5 s intro plays full screen (`public/media/intro.*`; `intro-mobile.mp4` below 768 px):
+  the plane comes out of the distance and flies past into white. It holds soft white for
+  0.3 s, then cross-fades into `clouds-bg.jpg` (the same sky without the plane, with a slow
+  30 s Ken Burns drift), and the page builds in: nav, live pill, name, tagline, text,
+  buttons, then the live stat cards. "Skip intro" (or Esc) jumps ahead. Later visits in the
+  same session, reduced motion, a refused autoplay, or a video that hasn't started within
+  2.5 s all go straight to the page. `?intro=1` forces a replay for demos, and `?intro=0`
+  skips it. The video never blocks anything: data for the stat cards is fetched while it
+  plays. "Explore today's fares" fades to white into the dashboard.
 * **Theme: "sky & clouds".** Cloud white `#F7F5F1`, sky blue `#BFD6EA` / `#8FB3D9`, sunrise
   peach `#F3DCC8`, deep navy `#1B3556` (text and primary buttons) and slate `#5B6B80`,
   defined once as CSS variables in `src/index.css`. Headings use Instrument Serif and body

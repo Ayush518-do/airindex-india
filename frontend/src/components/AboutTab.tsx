@@ -27,6 +27,10 @@ export default function AboutTab({ meta, onReplayGuide }: { meta: Meta | null; o
                 It also shows the best time to book each route, how festivals push prices up, and can email you when a
                 route you care about gets cheaper than usual.
               </p>
+              <p>
+                It was built for the Ministry of Statistics (MoSPI), to show how airfares move day to day in between
+                the government's monthly official figures.
+              </p>
             </div>
           </Panel>
         </Section>

@@ -136,16 +136,24 @@ body {
   to   { transform: translateX(140vw); }
 }
 
-/* Landing hero video: a slow sideways drift, like flying alongside. */
-@keyframes hero-drift {
-  0%, 100% { transform: translate3d(1.5%, 0, 0); }
-  50%      { transform: translate3d(-1.5%, 0, 0); }
+/* Landing hero: the empty sky the plane just left, with a very slow
+   Ken Burns drift + zoom (30 s each way) so it feels alive. */
+@keyframes ken-burns {
+  from { transform: scale(1.02) translate3d(0, 0, 0); }
+  to   { transform: scale(1.1) translate3d(-2%, -1%, 0); }
 }
-.hero-drift { animation: hero-drift 22s ease-in-out infinite; }
+.ken-burns {
+  animation: ken-burns 30s ease-in-out infinite alternate;
+  transform-origin: 60% 45%;
+  will-change: transform;
+}
 
-/* White fade-in after the landing → dashboard transition. */
+/* White fade-in when arriving on the dashboard from the landing page. */
 @keyframes white-out { from { opacity: 1; } to { opacity: 0; visibility: hidden; } }
 .white-fade { animation: white-out 0.7s ease-out 0.05s forwards; }
+/* …and the fade to white on the landing page before it navigates. */
+@keyframes white-in { from { opacity: 0; } to { opacity: 1; } }
+.white-in { animation: white-in 0.35s ease-in forwards; }
 
 /* Skeleton shimmer for loading states. Disabled under reduced motion. */
 @keyframes shimmer { 100% { transform: translateX(100%); } }
@@ -166,7 +174,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .skeleton::after { animation: none; }
-  .sky-cloud, .hero-drift { animation: none !important; }
+  .sky-cloud, .ken-burns { animation: none !important; }
   .white-fade { display: none; }
   *, *::before, *::after { scroll-behavior: auto !important; }
 }

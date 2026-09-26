@@ -31,14 +31,14 @@ export default function Layout() {
   }, [location.pathname]);
 
   const onHome = location.pathname === '/home';
-  // Arriving from the landing page's fly-past: the screen is white, so fade in from white.
-  const fromFlight = (location.state as { fromFlight?: boolean } | null)?.fromFlight === true;
+  // Arriving from the landing page, which faded to white: fade in from white.
+  const fromLanding = (location.state as { fromLanding?: boolean } | null)?.fromLanding === true;
   // Once the fade has run, drop the flag so a reload doesn't replay it.
   useEffect(() => {
-    if (!fromFlight) return;
+    if (!fromLanding) return;
     const t = window.setTimeout(() => navigate(location.pathname + location.search, { replace: true, state: null }), 900);
     return () => clearTimeout(t);
-  }, [fromFlight, location.pathname, location.search, navigate]);
+  }, [fromLanding, location.pathname, location.search, navigate]);
   const forceTour = params.get('tour') === '1';
 
   // First-visit tour — Home only, once there is data to point at.
@@ -59,7 +59,7 @@ export default function Layout() {
   return (
     <div className="relative min-h-screen">
       <SkyBackdrop />
-      {fromFlight && <div aria-hidden key={location.key} className="white-fade pointer-events-none fixed inset-0 z-[90] bg-white" />}
+      {fromLanding && <div aria-hidden key={location.key} className="white-fade pointer-events-none fixed inset-0 z-[90] bg-white" />}
 
       <TopBar />
 
@@ -88,7 +88,7 @@ export default function Layout() {
 
         {meta && (
           <footer className="pb-6 pt-2 text-[13px] leading-relaxed text-ink-3">
-            A Smart India Hackathon 2026 project for MoSPI · not an official statistic.
+            AIRINDEX INDIA · built for the Ministry of Statistics (MoSPI) · not an official statistic.
             {meta.snapshot_at && <> Prices last checked {new Date(meta.snapshot_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })}.</>}
             {meta.demo_mode && <> <b className="text-warn">Demo mode is on — the price history includes example data.</b></>}
           </footer>
