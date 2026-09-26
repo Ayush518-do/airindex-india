@@ -1,38 +1,22 @@
-import BlobCursor from './reactbits/BlobCursor';
+import ContrailCursor from './ContrailCursor';
 import ClickSpark from './reactbits/ClickSpark';
 import { useMotionSettings } from '../lib/motion';
 
 /**
- * Page-wide cursor effects: a soft trail that follows the mouse, and a small
- * spark on click. Both are decorative and aria-hidden, never intercept input,
- * and are not mounted at all on touch devices or under reduced motion.
+ * Page-wide cursor effects: a thin sky-blue contrail that follows the mouse
+ * and fades behind it, and a small peach spark on click. Both are decorative
+ * and aria-hidden, never intercept input, and are not mounted at all on
+ * touch devices or under reduced motion.
  *
- * Deliberately restrained: the native cursor stays visible (a replaced cursor
- * hurts precision on charts and forms), and BlobCursor's SVG "goo" filter is
- * off — it blurs a full-viewport layer on every mouse move, which is a lot of
- * GPU for a flourish.
+ * The native cursor stays visible — a replaced cursor hurts precision on
+ * charts and forms.
  */
 export default function CursorEffects() {
   const { cursorEffects } = useMotionSettings();
   if (!cursorEffects) return null;
   return (
     <>
-      <BlobCursor
-        useFilter={false}
-        trailCount={3}
-        sizes={[14, 26, 20]}
-        innerSizes={[6, 10, 8]}
-        fillColor="rgba(143, 179, 217, 0.38)"
-        innerColor="rgba(255, 255, 255, 0.85)"
-        opacities={[0.9, 0.5, 0.35]}
-        shadowColor="rgba(0,0,0,0)"
-        shadowBlur={0}
-        shadowOffsetX={0}
-        shadowOffsetY={0}
-        fastDuration={0.12}
-        slowDuration={0.5}
-        zIndex={55}
-      />
+      <ContrailCursor />
       <ClickSpark sparkColor="#d9895a" sparkSize={8} sparkRadius={16} sparkCount={8} duration={380} />
     </>
   );
