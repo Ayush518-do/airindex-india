@@ -5,11 +5,13 @@ import LandingPage from './pages/LandingPage';
 import HomePage from './pages/HomePage';
 import RoutesPage from './pages/RoutesPage';
 import { FestivalsPage, OfficialPage, AlertsPage, AboutPage, NotFoundPage } from './pages/SimplePages';
+import { InAppNavigationTracker } from './components/IntroVideo';
 import { AppDataProvider } from './lib/appData';
 
 export default function App() {
   return (
     <BrowserRouter>
+      <InAppNavigationTracker />
       {/* Data loads once for the whole app — including behind the landing
           page's video, so the dashboard is ready by the time anyone clicks. */}
       <AppDataProvider>

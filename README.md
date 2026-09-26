@@ -425,16 +425,17 @@ data/models/        fare_model.pkl (rebuilt, git-ignored)
   compact labels), WCAG AA colours (muted text ≥ 4.9:1, chart marks ≥ 3:1), visible focus
   rings, full keyboard navigation with a skip link, focus moved to the content on each page
   change, and `aria-label`s on icon buttons and every chart.
-* **Landing page** (`src/pages/LandingPage.tsx`). On the first visit in a browser session
-  a ~5 s intro plays full screen (`public/media/intro.*`; `intro-mobile.mp4` below 768 px):
-  the plane comes out of the distance and flies past into white. It holds soft white for
-  0.3 s, then cross-fades into `clouds-bg.jpg` (the same sky without the plane, with a slow
-  30 s Ken Burns drift), and the page builds in: nav, live pill, name, tagline, text,
-  buttons, then the live stat cards. "Skip intro" (or Esc) jumps ahead. Later visits in the
-  same session, reduced motion, a refused autoplay, or a video that hasn't started within
-  2.5 s all go straight to the page. `?intro=1` forces a replay for demos, and `?intro=0`
-  skips it. The video never blocks anything: data for the stat cards is fetched while it
-  plays. "Explore today's fares" fades to white into the dashboard.
+* **Landing page** (`src/pages/LandingPage.tsx`). Every full page load of `/` (F5, a new tab,
+  typing the URL) plays a ~5 s intro full screen (`public/media/intro.*`; `intro-mobile.mp4`
+  below 768 px): the plane comes out of the distance and flies past into white. It holds
+  soft white for 0.3 s, then cross-fades into `clouds-bg.jpg` (the same sky without the
+  plane, with a slow 30 s Ken Burns drift), and the page builds in: nav, live pill, name,
+  tagline, text, buttons, then the live stat cards. The intro is skipped only when the
+  visitor clicks "Skip intro" (or presses Esc), comes back to `/` from inside the app,
+  has reduced motion on, or autoplay is blocked or hasn't started within 2.5 s. Nothing is
+  stored in the browser for this. In a background tab it waits until the tab is shown.
+  The video never blocks anything: data for the stat cards is fetched while it plays.
+  "Explore today's fares" fades to white into the dashboard.
 * **Theme: "sky & clouds".** Cloud white `#F7F5F1`, sky blue `#BFD6EA` / `#8FB3D9`, sunrise
   peach `#F3DCC8`, deep navy `#1B3556` (text and primary buttons) and slate `#5B6B80`,
   defined once as CSS variables in `src/index.css`. Headings use Instrument Serif and body
@@ -445,7 +446,8 @@ data/models/        fare_model.pkl (rebuilt, git-ignored)
   peach are fills only; text uses darker partners (`sky-ink`, `peach-ink`), so every
   pairing stays at WCAG AA, including on glass over the sky.
 * **Motion** uses React Bits components (BlurText, AnimatedContent, CountUp, GlareHover,
-  Magnet, Particles, BlobCursor, ClickSpark). `src/lib/motion.ts` turns heavy effects off
+  Magnet, Particles, ClickSpark) plus a small canvas contrail cursor (`ContrailCursor.tsx`: a thin
+  sky-blue line that fades behind the mouse, and only animates while it is visible). `src/lib/motion.ts` turns heavy effects off
   under *prefers-reduced-motion* and cursor effects off on touch screens. Animations never
   gate data.
 

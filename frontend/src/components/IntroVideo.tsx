@@ -1,31 +1,58 @@
 import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 
-const SESSION_KEY = 'airindex_intro_seen';
-
-/**
- * Play the intro? Once per browser session (tab), never under reduced motion.
- * `?intro=1` forces a replay (handy for demos), `?intro=0` skips it.
+/*
+ * When does the intro play? On every full page load of "/" (F5, a new tab,
+ * typing the URL) — but not when the visitor comes back to "/" from inside
+ * the app, so it doesn't replay during normal browsing.
+ *
+ * Nothing is stored: this flag lives in the loaded JavaScript, so a full load
+ * starts it at false and any in-app route change sets it. That is exactly
+ * the line between "page load" and "navigation".
  */
-export function shouldPlayIntro(reducedMotion: boolean): boolean {
-  if (reducedMotion) return false;
-  const forced = new URLSearchParams(window.location.search).get('intro');
-  if (forced === '1') return true;
-  if (forced === '0') return false;
-  try { return sessionStorage.getItem(SESSION_KEY) !== '1'; } catch { return false; }
+let navigatedInApp = false;
+let firstKey: string | null = null;
+
+/** Mount once inside the router: records the first in-app route change. */
+export function InAppNavigationTracker() {
+  const { key } = useLocation();
+  useEffect(() => {
+    // Compare with the first location seen rather than counting renders, so
+    // React's development double-run of effects can't mark a fresh load.
+    if (firstKey === null) firstKey = key;
+    else if (key !== firstKey) navigatedInApp = true;
+  }, [key]);
+  return null;
 }
 
-function markSeen() {
-  try { sessionStorage.setItem(SESSION_KEY, '1'); } catch { /* private mode */ }
+/**
+ * Play the intro? Every full page load, unless reduced motion is on.
+ *
+ * `locationKey` is the current router location. The landing page renders
+ * before the tracker's effect sees a new location, so both checks matter:
+ * a key other than the first one means we arrived by navigating (e.g. the
+ * logo on /home), and the flag covers Back to the very first entry.
+ */
+export function shouldPlayIntro(reducedMotion: boolean, locationKey: string): boolean {
+  if (reducedMotion || navigatedInApp) return false;
+  return firstKey === null || locationKey === firstKey;
 }
 
 type Phase = 'playing' | 'white' | 'reveal';
+
+// Pacing. The ~5 s clip plays at 1.5x (~3.3 s), then a brief white hold and a
+// quick cross-fade — calm, but no waiting around.
+const PLAYBACK_RATE = 1.5;
+const TO_WHITE_MS = 200;    // video fades out to the white it ends on
+const WHITE_HOLD_MS = 150;
+const CROSSFADE_MS = 600;   // white -> clouds
 
 /**
  * Step 1 of the landing sequence: the ~5 s intro, full screen, nothing on top
  * but a small "Skip intro" button. The plane appears in the distance, comes
  * closer, flies past and the frame ends in white.
  *
- * Then: hold soft white for 0.3 s, and cross-fade (1 s) to the clouds behind,
+ * Then: hold soft white for 0.15 s, and cross-fade (0.6 s) to the clouds behind,
  * which are already rendered underneath — so it feels like the plane has
  * just flown away. `onReveal` fires as the cross-fade starts (the page's
  * content begins its entrance then); `onDone` when the overlay is gone.
@@ -42,9 +69,6 @@ export default function IntroVideo({ onReveal, onDone }: { onReveal: () => void;
   const cb = useRef({ onReveal, onDone });
   cb.current = { onReveal, onDone };
 
-  // Seen as soon as it starts, so a reload in the same tab goes straight to the page.
-  useEffect(() => { markSeen(); }, []);
-
   // Lock scrolling while the intro covers the page.
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -56,6 +80,8 @@ export default function IntroVideo({ onReveal, onDone }: { onReveal: () => void;
     const v = videoRef.current;
     if (!v) return;
     v.muted = true; // React doesn't reliably reflect `muted`, and autoplay needs it
+    v.defaultPlaybackRate = PLAYBACK_RATE;
+    v.playbackRate = PLAYBACK_RATE;
     let slow = 0;
     const start = () => {
       v.play().catch(() => reveal(true));
@@ -86,7 +112,7 @@ export default function IntroVideo({ onReveal, onDone }: { onReveal: () => void;
     if (phaseRef.current !== 'playing') return;
     go('white');
     videoRef.current?.pause();
-    window.setTimeout(() => reveal(false), 300 + 200); // 0.2 s fade to white + 0.3 s hold
+    window.setTimeout(() => reveal(false), TO_WHITE_MS + WHITE_HOLD_MS);
   }
 
   /** Cross-fade to the clouds. `instant` = the video never ran, so no white hold. */
@@ -94,13 +120,13 @@ export default function IntroVideo({ onReveal, onDone }: { onReveal: () => void;
     if (phaseRef.current === 'reveal') return;
     go('reveal');
     cb.current.onReveal();
-    window.setTimeout(() => cb.current.onDone(), instant ? 350 : 1000);
+    window.setTimeout(() => cb.current.onDone(), instant ? 350 : CROSSFADE_MS);
   }
 
   return (
     <div
       className={`fixed inset-0 z-[100] bg-white transition-opacity ease-in-out ${
-        phase === 'reveal' ? 'pointer-events-none opacity-0 duration-1000' : 'opacity-100 duration-200'}`}
+        phase === 'reveal' ? 'pointer-events-none opacity-0 duration-[600ms]' : 'opacity-100 duration-200'}`}
     >
       <video
         ref={videoRef}
@@ -110,6 +136,8 @@ export default function IntroVideo({ onReveal, onDone }: { onReveal: () => void;
         poster="/media/intro-poster.jpg"
         autoPlay muted playsInline preload="auto"
         disablePictureInPicture
+        // Some browsers reset the rate when the media loads; set it again once it can play.
+        onCanPlay={e => { e.currentTarget.playbackRate = PLAYBACK_RATE; }}
         onPlaying={() => { started.current = true; }}
         onEnded={toWhite}
         onError={() => reveal(true)}

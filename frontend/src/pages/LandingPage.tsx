@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import IntroVideo, { shouldPlayIntro } from '../components/IntroVideo';
 import BlurText from '../components/reactbits/BlurText';
 import AnimatedContent from '../components/reactbits/AnimatedContent';
@@ -23,7 +23,7 @@ function Rise({ at, children, className = '', distance = 18 }: {
   const { heavyEffects } = useMotionSettings();
   if (!heavyEffects) return <div className={className}>{children}</div>;
   return (
-    <AnimatedContent distance={distance} duration={0.8} ease="power3.out" initialOpacity={0} delay={at} threshold={0} className={className}>
+    <AnimatedContent distance={distance} duration={0.5} ease="power3.out" initialOpacity={0} delay={at} threshold={0} className={className}>
       {children}
     </AnimatedContent>
   );
@@ -49,13 +49,13 @@ function Animated({ text, as: Tag, className, startDelay, by = 'words', step = 6
           <span className="flex flex-wrap gap-x-[0.25em]">
             {text.split(' ').map((word, i, words) => (
               <span key={i} className="whitespace-nowrap">
-                <BlurText text={word} animateBy="letters" delay={step} threshold={0} direction="bottom" stepDuration={0.32}
+                <BlurText text={word} animateBy="letters" delay={step} threshold={0} direction="bottom" stepDuration={0.25}
                   startDelay={startDelay + words.slice(0, i).join('').length * step} />
               </span>
             ))}
           </span>
         ) : (
-          <BlurText text={text} animateBy={by} delay={step} startDelay={startDelay} direction="bottom" stepDuration={0.32} threshold={0} />
+          <BlurText text={text} animateBy={by} delay={step} startDelay={startDelay} direction="bottom" stepDuration={0.25} threshold={0} />
         )}
       </div>
     </>
@@ -96,10 +96,11 @@ function CloudsBackdrop() {
 // ----------------------------------------------------------------- page ----
 /**
  * The landing sequence:
- *   1. First visit in this browser session: the intro video, full screen.
+ *   1. Every full page load: the intro video, full screen.
  *   2. Soft white, then a cross-fade into the empty sky (the plane has gone).
  *   3. The page builds in: nav, live pill, name, tagline, text, buttons, stats.
- * Later visits, reduced motion, or a refused autoplay go straight to step 3.
+ * Coming back from inside the app, Skip, reduced motion, or a refused
+ * autoplay go straight to step 3.
  * Data for the stat cards is fetched from the first render, intro or not.
  */
 export default function LandingPage() {
@@ -107,14 +108,16 @@ export default function LandingPage() {
   const { meta, daily, loading } = useAppData();
   const { reduced, heavyEffects } = useMotionSettings();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const [intro, setIntro] = useState(() => shouldPlayIntro(reduced));
+  const [intro, setIntro] = useState(() => shouldPlayIntro(reduced, location.key));
   // The page content starts its entrance when the intro hands over (or at once).
   const [ready, setReady] = useState(() => !intro);
   const [leaving, setLeaving] = useState(false);
-  // With an intro, the stagger starts as the clouds cross-fade in; without
-  // one, a touch sooner.
-  const t0 = intro ? 0.35 : 0.1;
+  // The stagger starts 0.2 s after the clouds appear (with no intro they're
+  // there from the start, so a touch sooner), then 0.12 s between items.
+  const t0 = intro ? 0.2 : 0.1;
+  const GAP = 0.12;
 
   const [official, setOfficial] = useState<OfficialCompare | null>(null);
   const [officialDone, setOfficialDone] = useState(false);
@@ -204,7 +207,7 @@ export default function LandingPage() {
               <>
                 <div className="max-w-[36rem]">
                   {/* (b) live pill */}
-                  <Rise at={t0 + 0.3}>
+                  <Rise at={t0 + GAP}>
                     <p className="inline-flex items-center gap-2 rounded-full border border-white/70 bg-white/65 px-3.5 py-1.5 text-[12px] font-semibold uppercase tracking-[0.14em] text-ink-2 backdrop-blur">
                       <span aria-hidden className="relative flex h-2.5 w-2.5">
                         <span className="absolute inline-flex h-full w-full rounded-full bg-good opacity-60 motion-safe:animate-ping" />
@@ -216,23 +219,23 @@ export default function LandingPage() {
 
                   {/* (c) name */}
                   <div className="mt-5">
-                    <Animated as="h1" text="AIRINDEX INDIA" by="letters" step={45} startDelay={(t0 + 0.5) * 1000}
+                    <Animated as="h1" text="AIRINDEX INDIA" by="letters" step={18} startDelay={(t0 + 2 * GAP) * 1000}
                       className="font-display text-[56px] leading-[0.95] text-ink sm:text-[80px] lg:text-[104px]" />
                   </div>
 
                   {/* (d) tagline */}
-                  <Animated as="p" text="Real-time Airfare Price Index for India" startDelay={(t0 + 1.1) * 1000} step={70}
+                  <Animated as="p" text="Real-time Airfare Price Index for India" startDelay={(t0 + 3 * GAP) * 1000} step={40}
                     className="mt-4 text-[20px] font-medium leading-snug text-ink sm:text-[24px]" />
 
                   {/* (e) subtext */}
-                  <Rise at={t0 + 1.5}>
+                  <Rise at={t0 + 4 * GAP}>
                     <p className="mt-3 max-w-[32rem] text-[16px] leading-relaxed text-ink-2 sm:text-[17px]">
                       Daily airfares from airlines and travel sites, compared with the government's official price index (MoSPI CPI).
                     </p>
                   </Rise>
 
                   {/* (f) buttons */}
-                  <Rise at={t0 + 1.75} className="mt-7">
+                  <Rise at={t0 + 5 * GAP} className="mt-7">
                     <div className="flex flex-wrap items-center gap-3">
                       {exploreBtn("Explore today's fares")}
                       {alertBtn}
@@ -247,7 +250,8 @@ export default function LandingPage() {
                       {[0, 1, 2, 3].map(i => <Skeleton key={i} className="h-[92px] !rounded-2xl !bg-white/50" />)}
                     </div>
                   ) : stats.length > 0 && (
-                    <Rise at={t0 + 2.05} distance={60}>
+                    // Slides up together with the buttons.
+                    <Rise at={t0 + 5 * GAP} distance={60}>
                       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                         {stats.map(s => (
                           <div key={s.label} className="rounded-2xl border border-white/70 bg-white/70 px-4 py-3 shadow-card backdrop-blur-xl">
