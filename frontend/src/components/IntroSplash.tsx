@@ -299,7 +299,7 @@ export default function IntroSplash({ onDone }: { onDone: () => void }) {
         }} />
       )}
 
-      <div className="absolute inset-0 bg-[#07070c] pointer-events-none"
+      <div className="absolute inset-0 bg-page pointer-events-none"
         style={{ opacity: leaving ? 1 : 0, transition: `opacity ${REVEAL_MS}ms ease-in` }} />
 
       <button onClick={finish}

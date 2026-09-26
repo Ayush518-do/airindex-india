@@ -1,64 +1,72 @@
 import Particles from './reactbits/Particles';
-import { StatCard, fmtDate, Badge } from './ui';
+import { StatCard, Delta, Badge, fmtDate, fmtLongDate } from './ui';
+import { GLOSSARY } from '../lib/glossary';
+import { useMotionSettings } from '../lib/motion';
 import type { IndexDaily, Meta } from '../services/api';
 
 export default function HeroStat({ daily, meta }: { daily: IndexDaily; meta: Meta }) {
+  const { heavyEffects } = useMotionSettings();
   const { latest, base_date, points } = daily;
+  if (!latest) return null;
   const real = daily.n_real_days ?? points.length;
-  const seeded = daily.n_synthetic_days ?? 0;
+  const example = daily.n_synthetic_days ?? 0;
   const lastPoint = points[points.length - 1];
-  const snapshot = meta.snapshot_at ? new Date(meta.snapshot_at) : null;
+  const prev = points.length > 1 ? points[points.length - 2] : null;
 
   return (
-    <div className="relative rounded-2xl overflow-hidden">
-      {/* Subtle cursor-reactive particle field behind the hero (React Bits / ogl). */}
-      <div className="absolute inset-0 -z-0 pointer-events-none opacity-60">
-        <Particles
-          particleCount={140}
-          particleSpread={9}
-          speed={0.06}
-          particleColors={['#9085e9', '#3987e5', '#ffffff']}
-          moveParticlesOnHover
-          particleHoverFactor={0.6}
-          alphaParticles
-          particleBaseSize={70}
-          sizeRandomness={0.8}
-          cameraDistance={22}
-          disableRotation={false}
-        />
-      </div>
-
-      <div className="relative grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="md:col-span-2">
-          <StatCard
-            label={`${daily.index_name} · ${fmtDate(latest.date)}`}
-            value={latest.value}
-            decimals={1}
-            delta={latest.change_pct}
-            deltaLabel="day-over-day"
-            footnote={
-              <>
-                Base {fmtDate(base_date)} = 100 · {latest.change_abs >= 0 ? '+' : ''}{latest.change_abs.toFixed(2)} pts vs previous day
-                {lastPoint.coverage != null && <> · basket coverage {(lastPoint.coverage * 100).toFixed(0)}%</>}
-              </>
-            }
-          >
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <Badge tone="good">{real} real scrape day{real === 1 ? '' : 's'}</Badge>
-              {seeded > 0 && <Badge tone="warn">{seeded} seeded days (synthetic, disclosed)</Badge>}
-              {snapshot && (
-                <span className="text-[11.5px] text-white/40">
-                  latest snapshot {snapshot.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                </span>
-              )}
-            </div>
-          </StatCard>
+    <div className="relative" data-tour="index">
+      {heavyEffects && (
+        // Pastel particles drifting behind the cards; they part around the cursor.
+        <div aria-hidden className="pointer-events-none absolute -inset-4 opacity-70">
+          <Particles
+            particleCount={110}
+            particleSpread={10}
+            speed={0.05}
+            particleColors={['#8b7cf6', '#5aa2e8', '#a9c9f2']}
+            moveParticlesOnHover
+            particleHoverFactor={0.5}
+            alphaParticles
+            particleBaseSize={60}
+            sizeRandomness={0.8}
+            cameraDistance={22}
+          />
         </div>
+      )}
+
+      <div className="relative grid grid-cols-1 gap-4 md:grid-cols-3">
         <StatCard
-          label="Fares in today's index"
+          className="md:col-span-2"
+          label={`Airfare Price Index · ${fmtDate(latest.date)}`}
+          info={GLOSSARY.apix.short}
+          value={latest.value}
+          decimals={1}
+        >
+          <Delta value={latest.change_pct}
+            suffix={prev ? `than on ${fmtDate(prev.date)}` : ''} />
+          {!prev && <p className="mt-2 text-[14px] text-ink-2">This is our first day of prices — changes show from the next check.</p>}
+          <p className="mt-2 text-[13px] text-ink-3">
+            100 = prices on {base_date ? fmtLongDate(base_date) : 'our first day'}.
+            {' '}{latest.value >= 100
+              ? `Fares are ${(latest.value - 100).toFixed(1)}% higher than that day.`
+              : `Fares are ${(100 - latest.value).toFixed(1)}% lower than that day.`}
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Badge tone="sky">{real} day{real === 1 ? '' : 's'} of real prices</Badge>
+            {example > 0 && <Badge tone="warn">+ {example} days of example data</Badge>}
+          </div>
+        </StatCard>
+
+        <StatCard
+          label="Fares checked today"
+          info={GLOSSARY.nonstop.short}
           value={lastPoint.n_records}
-          footnote={`nonstop economy, outliers removed · ${Object.keys(daily.weights).length} routes, DGCA-share weighted`}
-        />
+        >
+          <p className="mt-2 text-[14px] text-ink-2">
+            Direct economy flights on {Object.keys(daily.weights).length} busy routes, from{' '}
+            {meta.sources.filter(s => !s.synthetic).length || 'several'} booking site{meta.sources.filter(s => !s.synthetic).length === 1 ? '' : 's'}.
+          </p>
+          <p className="mt-2 text-[13px] text-ink-3">Unusually high prices are set aside so one odd fare can't skew the average.</p>
+        </StatCard>
       </div>
     </div>
   );

@@ -1,64 +1,75 @@
 import ShinyText from './reactbits/ShinyText';
-import { Badge } from './ui';
+import { Badge, INK, SERIES } from './ui';
+import { useMotionSettings } from '../lib/motion';
 import { API_DOCS_URL, type Meta } from '../services/api';
 
-export type Tab = 'overview' | 'festivals' | 'my-routes';
+export type Tab = 'overview' | 'festivals' | 'my-routes' | 'about';
 
-const TABS: { id: Tab; label: string; enabled: boolean }[] = [
-  { id: 'overview', label: 'Overview', enabled: true },
-  { id: 'festivals', label: 'Festivals', enabled: true },
-  { id: 'my-routes', label: 'My Routes', enabled: true },
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview', label: 'Today' },
+  { id: 'festivals', label: 'Festivals' },
+  { id: 'my-routes', label: 'My alerts' },
+  { id: 'about', label: 'How it works' },
 ];
 
 export default function TopBar({
   meta, tab, onTab, alertCount = 0,
 }: { meta: Meta | null; tab: Tab; onTab: (t: Tab) => void; alertCount?: number }) {
+  const { heavyEffects } = useMotionSettings();
   return (
-    <header className="sticky top-0 z-20 border-b border-white/[0.07] bg-[rgba(10,10,18,0.78)] backdrop-blur-xl">
-      <div className="max-w-[1400px] mx-auto px-4 md:px-8 h-14 flex items-center gap-4">
-        <div className="flex items-baseline gap-2 min-w-0">
-          <ShinyText text="AIRINDEX INDIA" className="text-[16px] font-bold tracking-tight" color="#c9c6f0" shineColor="#ffffff" speed={4} />
-          <span className="hidden sm:inline text-[11px] text-white/35 truncate">Real-time Airfare Price Index · APIx</span>
+    <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur-md">
+      <div className="mx-auto flex max-w-[1280px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 md:px-8">
+        <div className="flex min-w-0 items-baseline gap-2">
+          {/* Both ends of the shine gradient clear 4.5:1 on white, so the
+              wordmark stays readable at every frame of the animation. */}
+          <ShinyText text="AIRINDEX INDIA" className="text-[17px] font-bold tracking-tight"
+            color={INK} shineColor={SERIES.blue} speed={5} disabled={!heavyEffects} />
+          <span className="hidden truncate text-[12px] text-ink-3 lg:inline">India's live airfare price index</span>
         </div>
 
-        <nav className="ml-auto flex items-center gap-1" aria-label="Sections">
-          {TABS.map(t => (
-            <button
-              key={t.id}
-              disabled={!t.enabled}
-              onClick={() => onTab(t.id)}
-              className={`rounded-lg px-3 py-1.5 text-[13px] transition-colors border ${
-                tab === t.id
-                  ? 'bg-[#7c5cff]/18 text-white font-medium border-[#7c5cff]/30'
-                  : 'text-white/55 hover:text-white hover:bg-white/[0.05] border-transparent disabled:opacity-35 disabled:hover:bg-transparent'
-              }`}
-              title={t.enabled ? undefined : 'Coming in a later step'}
-            >
-              {t.label}
-              {t.id === 'my-routes' && alertCount > 0 && (
-                <span className="ml-1.5 inline-flex items-center justify-center rounded-full bg-emerald-400/25 text-emerald-200 text-[10px] font-semibold h-4 min-w-4 px-1">{alertCount}</span>
-              )}
-            </button>
-          ))}
-        </nav>
-
-        <div className="flex items-center gap-2 md:pl-3 md:border-l md:border-white/[0.07]">
-          {/* Demo mode must be unmistakable at a glance, on every page and at
-              every width — a demo screenshot should never pass for real output.
-              It is driven solely by meta.demo_mode, never inferred. */}
-          {meta?.demo_mode && <Badge tone="warn">DEMO DATA — NOT REAL FARES</Badge>}
+        <div className="ml-auto flex items-center gap-2 md:order-3">
+          {/* Demo mode must be unmistakable on every page and at every width —
+              a demo screenshot should never pass for real prices. Driven only
+              by meta.demo_mode, never inferred. */}
+          {meta?.demo_mode && <Badge tone="warn">Demo data — not real fares</Badge>}
           {meta && !meta.demo_mode && (
             <Badge tone={meta.has_data ? 'good' : 'neutral'}>
+              <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${meta.has_data ? 'bg-good' : 'bg-ink-3'}`} />
               {meta.has_data
-                ? `LIVE${meta.snapshot_at ? ' · ' + new Date(meta.snapshot_at).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : ''}`
-                : 'NO DATA YET'}
+                ? `Live · checked ${meta.snapshot_at ? new Date(meta.snapshot_at).toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' }) : ''}`
+                : 'No prices yet'}
             </Badge>
           )}
           <a href={API_DOCS_URL} target="_blank" rel="noreferrer"
-             className="hidden md:inline text-[12px] text-white/50 hover:text-white underline-offset-2 hover:underline">
-            API docs ↗
+             className="hidden text-[13px] text-ink-3 underline-offset-2 hover:text-accent-ink hover:underline xl:inline">
+            Data API ↗
           </a>
         </div>
+
+        <nav aria-label="Main" className="-mx-1 flex w-full overflow-x-auto md:order-2 md:ml-6 md:w-auto">
+          {TABS.map(t => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => onTab(t.id)}
+                aria-current={active ? 'page' : undefined}
+                data-tour={t.id === 'festivals' ? 'festivals-tab' : t.id === 'my-routes' ? 'alerts-tab' : undefined}
+                className={`relative mx-0.5 shrink-0 rounded-lg px-3 py-1.5 text-[14px] transition-colors ${
+                  active ? 'bg-accent-soft font-semibold text-accent-ink' : 'text-ink-2 hover:bg-surface-2 hover:text-ink'
+                }`}
+              >
+                {t.label}
+                {t.id === 'my-routes' && alertCount > 0 && (
+                  <span className="ml-1.5 inline-grid h-5 min-w-5 place-items-center rounded-full bg-good px-1 text-[11px] font-bold text-white"
+                    aria-label={`${alertCount} route${alertCount === 1 ? '' : 's'} cheap today`}>
+                    {alertCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </nav>
       </div>
     </header>
   );

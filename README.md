@@ -32,17 +32,29 @@ festival surge, fare prediction, low-fare alerts).
 python -m venv .venv
 .venv/Scripts/activate            # Windows   (source .venv/bin/activate on macOS/Linux)
 pip install -r backend/requirements.txt
+
+# 2. Download the browser the scrapers drive (REQUIRED — pip does not do this)
 python -m playwright install chromium
 
-# 2. Build the data store from the cached snapshots that ship in data/raw/
+# 3. Build the data store from the cached snapshots that ship in data/raw/,
+#    then fetch the official MoSPI CPI series (no API key needed)
 python -m pipeline.run_all --rebuild
+python -m pipeline.mospi
 
-# 3. API  (http://localhost:8000/docs)
+# 4. API  (http://localhost:8000/docs)
 python -m uvicorn backend.main:app --reload --reload-dir backend --reload-dir pipeline --port 8000
 
-# 4. Frontend  (http://localhost:5173)
+# 5. Frontend  (http://localhost:5173)
 cd frontend && npm install && npm run dev
 ```
+
+> **Playwright browser missing?** If a scrape fails with *"Executable doesn't exist"*
+> or *"Looks like Playwright was just installed or updated"*, run
+> `python -m playwright install chromium` again. Playwright keeps its browsers in a
+> per-user cache (`%USERPROFILE%\AppData\Local\ms-playwright` on Windows) tied to the
+> package version, so any Playwright upgrade — including one pulled in by
+> `pip install -r backend/requirements.txt` — needs the matching browser re-downloaded.
+> The API and dashboard don't need it; only scraping does.
 
 The app reads only from `data/processed/airindex.db`, which is built from the JSON snapshots
 in `data/raw/`. **It never depends on a live scrape**, so the demo works offline and cannot
@@ -320,12 +332,32 @@ data/models/        fare_model.pkl (rebuilt, git-ignored)
 
 ## Frontend notes
 
-Dark, responsive single-page dashboard (Vite + React + TypeScript + Tailwind + Recharts).
-Animation uses React Bits components installed from the shadcn registry
-(`https://reactbits.dev/r/<Name>-TS-TW.json`): `Particles` (cursor-reactive field behind
-the hero), `FadeContent` (section scroll-in), plus `Aurora`, `CountUp`, `SpotlightCard`,
-`ShinyText`. Data-series colours are a CVD-validated categorical palette; status colours are
-reserved for the day-over-day delta and alerts.
+Light, responsive single-page dashboard (Vite + React + TypeScript + Tailwind + Recharts),
+written for travellers rather than statisticians.
+
+* **Plain English everywhere.** Every panel has a heading that says what it shows and a
+  "What does this mean?" (i) tooltip. Definitions live in one place,
+  `src/lib/glossary.ts`, shared by the tooltips and the *How it works* page, so the wording
+  never drifts. Empty states say *why* there's nothing yet. A skippable 4-step tour runs on
+  first visit and can be replayed from *How it works*.
+* **City names, never bare codes.** Routes render as "Delhi (DEL) → Mumbai (BOM)" — in
+  dropdowns, charts, tables, alerts and alert emails. The list lives once, in
+  `pipeline/cities.py`, and the frontend loads it from `GET /meta/cities`.
+* **Colour.** Semantic tokens are CSS variables in `src/index.css`, mirrored in
+  `tailwind.config.js` (`text-ink`, `bg-surface`, `bg-accent/10`…). Every text colour was
+  checked against WCAG AA (the most muted, `ink-3`, is 5.57:1); chart marks clear 3:1. The
+  price map runs light (cheap) → dark (expensive), and its cell labels switch between dark
+  and white text so every step stays above 4.5:1.
+* **Motion** uses React Bits components copied from `https://reactbits.dev/r/<Name>-TS-TW.json`:
+  Aurora (light mode) and Particles for a slow pastel background, BlurText for page titles,
+  AnimatedContent for sections scrolling in, CountUp for the headline index, GlareHover on
+  stat cards, Magnet on primary buttons, and BlobCursor + ClickSpark for the cursor.
+  `src/lib/motion.ts` turns the heavy effects off under *prefers-reduced-motion* and the
+  cursor effects off on touch screens. Animations never gate data: content is in the DOM
+  from the first render.
+* ClickSpark and BlobCursor are adapted for page-wide use (see the notes at the top of each
+  file): upstream ClickSpark sized its canvas to the whole document and redrew it every
+  frame even while idle; ours is viewport-sized and only animates while sparks are alive.
 
 ## Adding a source
 

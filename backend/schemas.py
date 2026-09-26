@@ -65,6 +65,9 @@ class Meta(BaseModel):
     window_labels: dict[str, str] = Field(
         default_factory=dict, description="Plain-English gloss, e.g. '0-3' -> 'Booked 0-3 days before travel'"
     )
+    window_short: dict[str, str] = Field(
+        default_factory=dict, description="Compact form for tables and chart ticks, e.g. '0-3' -> '0–3 days ahead'"
+    )
     carriers: list[str]
     n_real_days: int
     n_synthetic_days: int

@@ -2,25 +2,115 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Semantic colour tokens — the only place the palette is defined.
+ *
+ * Stored as bare RGB channels so Tailwind's opacity modifiers keep working
+ * (`bg-accent/10`, `border-line/60`); tailwind.config.js maps each one to a
+ * utility name. Every text/background pairing here was checked against WCAG AA
+ * (>= 4.5:1 for text, >= 3:1 for chart marks); the most muted text, ink-3,
+ * still reaches 5.57:1 on the page background.
+ *
+ * Palette reference: the intro splash — daylight sky blue and soft lavender.
+ */
+:root {
+  --page: 244 247 251;        /* #f4f7fb  cool near-white page */
+  --surface: 255 255 255;     /* #ffffff  cards */
+  --surface-2: 238 243 249;   /* #eef3f9  inputs, tiles, table stripes */
+  --line: 227 233 242;        /* #e3e9f2  hairlines */
+  --line-strong: 203 214 229; /* #cbd6e5  input borders */
+
+  --ink: 20 33 61;            /* #14213d  headings, key numbers   14.3:1 */
+  --ink-2: 59 71 96;          /* #3b4760  body text                8.3:1 */
+  --ink-3: 86 97 121;         /* #566179  captions, axis labels    5.6:1 */
+
+  --accent: 90 72 216;        /* #5a48d8  lavender buttons (white text 6.3:1) */
+  --accent-ink: 74 59 196;    /* #4a3bc4  lavender text/links      6.9:1 */
+  --accent-soft: 237 233 255; /* #ede9ff  lavender tint */
+
+  --sky: 36 104 180;          /* #2468b4  sky-blue fill (white text 5.7:1) */
+  --sky-ink: 29 95 168;       /* #1d5fa8  sky-blue text            5.8:1 */
+  --sky-soft: 228 240 252;    /* #e4f0fc  sky tint */
+
+  --good: 18 112 58;          /* #12703a  cheaper / on track */
+  --good-soft: 227 245 233;
+  --bad: 180 35 24;           /* #b42318  pricier / error */
+  --bad-soft: 253 232 230;
+  --warn: 122 79 0;           /* #7a4f00  caution (demo mode, pending) */
+  --warn-soft: 255 242 204;
+
+  --shadow-card: 0 1px 2px rgb(20 33 61 / 0.04), 0 8px 24px -12px rgb(20 33 61 / 0.12);
+  --shadow-pop: 0 12px 32px -8px rgb(20 33 61 / 0.22);
+
+  color-scheme: light;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
-html, body, #root { height: 100%; }
+html, body, #root { min-height: 100%; }
 
 body {
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: #07070c;
-  color: #e8e8f0;
+  background: rgb(var(--page));
+  color: rgb(var(--ink));
+}
+
+/* Visible keyboard focus everywhere; mouse clicks don't show the ring. */
+:focus-visible {
+  outline: 2px solid rgb(var(--accent-ink));
+  outline-offset: 2px;
+  border-radius: 6px;
 }
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: #0b0b14; }
-::-webkit-scrollbar-thumb { background: #262637; border-radius: 6px; }
-::-webkit-scrollbar-thumb:hover { background: #35354d; }
+::-webkit-scrollbar-track { background: rgb(var(--page)); }
+::-webkit-scrollbar-thumb { background: rgb(var(--line-strong)); border-radius: 6px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--ink-3) / 0.5); }
 
+@layer components {
+  /* Every panel. Solid white rather than translucent glass: the animated
+     background sits behind it, and translucency would lower text contrast
+     unpredictably as the background moves. */
+  .card {
+    background: rgb(var(--surface));
+    border: 1px solid rgb(var(--line));
+    border-radius: 1rem;
+    box-shadow: var(--shadow-card);
+  }
+  .field {
+    @apply w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-[14px] text-ink
+           placeholder:text-ink-3 focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25;
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-[14px]
+           font-semibold text-white shadow-sm transition-colors hover:bg-accent-ink
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-line-strong bg-surface
+           px-3 py-2 text-[14px] font-medium text-ink-2 transition-colors hover:border-accent hover:text-accent-ink;
+  }
+}
 
-.glass {
-  background: rgba(19, 19, 32, 0.66);
-  backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+/* Skeleton shimmer for loading states. Disabled under reduced motion. */
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: rgb(var(--surface-2));
+  border-radius: 0.5rem;
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.7), transparent);
+  animation: shimmer 1.4s infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton::after { animation: none; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
 }

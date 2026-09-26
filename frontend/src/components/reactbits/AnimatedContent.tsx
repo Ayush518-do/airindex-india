@@ -1,19 +1,22 @@
-import * as React from 'react';
-import { useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { gsap } from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 
 gsap.registerPlugin(ScrollTrigger);
 
-interface FadeContentProps extends React.HTMLAttributes<HTMLDivElement> {
+interface AnimatedContentProps extends React.HTMLAttributes<HTMLDivElement> {
   children: React.ReactNode;
   container?: Element | string | null;
-  blur?: boolean;
+  distance?: number;
+  direction?: 'vertical' | 'horizontal';
+  reverse?: boolean;
   duration?: number;
   ease?: string;
-  delay?: number;
-  threshold?: number;
   initialOpacity?: number;
+  animateOpacity?: boolean;
+  scale?: number;
+  threshold?: number;
+  delay?: number;
   disappearAfter?: number;
   disappearDuration?: number;
   disappearEase?: string;
@@ -21,18 +24,22 @@ interface FadeContentProps extends React.HTMLAttributes<HTMLDivElement> {
   onDisappearanceComplete?: () => void;
 }
 
-const FadeContent: React.FC<FadeContentProps> = ({
+const AnimatedContent: React.FC<AnimatedContentProps> = ({
   children,
   container,
-  blur = false,
-  duration = 1000,
-  ease = 'power2.out',
-  delay = 0,
-  threshold = 0.1,
+  distance = 100,
+  direction = 'vertical',
+  reverse = false,
+  duration = 0.8,
+  ease = 'power3.out',
   initialOpacity = 0,
+  animateOpacity = true,
+  scale = 1,
+  threshold = 0.1,
+  delay = 0,
   disappearAfter = 0,
   disappearDuration = 0.5,
-  disappearEase = 'power2.in',
+  disappearEase = 'power3.in',
   onComplete,
   onDisappearanceComplete,
   className = '',
@@ -50,26 +57,29 @@ const FadeContent: React.FC<FadeContentProps> = ({
       scrollerTarget = document.querySelector(scrollerTarget);
     }
 
+    const axis = direction === 'horizontal' ? 'x' : 'y';
+    const offset = reverse ? -distance : distance;
     const startPct = (1 - threshold) * 100;
-    const getSeconds = (val: number) => (val > 10 ? val / 1000 : val);
 
     gsap.set(el, {
-      autoAlpha: initialOpacity,
-      filter: blur ? 'blur(10px)' : 'blur(0px)',
-      willChange: 'opacity, filter, transform'
+      [axis]: offset,
+      scale,
+      opacity: animateOpacity ? initialOpacity : 1,
+      visibility: 'visible'
     });
 
     const tl = gsap.timeline({
       paused: true,
-      delay: getSeconds(delay),
+      delay,
       onComplete: () => {
         if (onComplete) onComplete();
         if (disappearAfter > 0) {
           gsap.to(el, {
-            autoAlpha: initialOpacity,
-            filter: blur ? 'blur(10px)' : 'blur(0px)',
-            delay: getSeconds(disappearAfter),
-            duration: getSeconds(disappearDuration),
+            [axis]: reverse ? distance : -distance,
+            scale: 0.8,
+            opacity: animateOpacity ? initialOpacity : 0,
+            delay: disappearAfter,
+            duration: disappearDuration,
             ease: disappearEase,
             onComplete: () => onDisappearanceComplete?.()
           });
@@ -78,10 +88,11 @@ const FadeContent: React.FC<FadeContentProps> = ({
     });
 
     tl.to(el, {
-      autoAlpha: 1,
-      filter: 'blur(0px)',
-      duration: getSeconds(duration),
-      ease: ease
+      [axis]: 0,
+      scale: 1,
+      opacity: 1,
+      duration,
+      ease
     });
 
     const st = ScrollTrigger.create({
@@ -95,15 +106,31 @@ const FadeContent: React.FC<FadeContentProps> = ({
     return () => {
       st.kill();
       tl.kill();
-      gsap.killTweensOf(el);
     };
-  }, []);
+  }, [
+    container,
+    distance,
+    direction,
+    reverse,
+    duration,
+    ease,
+    initialOpacity,
+    animateOpacity,
+    scale,
+    threshold,
+    delay,
+    disappearAfter,
+    disappearDuration,
+    disappearEase,
+    onComplete,
+    onDisappearanceComplete
+  ]);
 
   return (
-    <div ref={ref} className={className} {...props}>
+    <div ref={ref} className={`invisible ${className}`} {...props}>
       {children}
     </div>
   );
 };
 
-export default FadeContent;
+export default AnimatedContent;

@@ -292,6 +292,7 @@ def meta(conn: sqlite3.Connection = Depends(get_db)):
         "weights": index_engine.ROUTE_WEIGHTS,
         "windows": index_engine.WINDOWS,
         "window_labels": WINDOW_LABELS,
+        "window_short": WINDOW_SHORT,
         "carriers": carriers,
         "n_real_days": daily["n_real_days"] if daily else 0,
         "n_synthetic_days": daily["n_synthetic_days"] if daily else 0,
